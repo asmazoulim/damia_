@@ -1,0 +1,1888 @@
+{
+ "_meta": {
+  "projet": "DAMIA MCP — Assistant IA Open DAMIR",
+  "version": "0.6 — + correspondances code/libellé/synonymes pour région, sexe, âge",
+  "date_maj": "2026-07-15",
+  "perimetre_assistant": "2022-2025",
+  "note": "Données ouvertes anonymisées, tous régimes. Aucune donnée individuelle. Lecture seule.",
+  "note_indicateurs": "La table de faits V1 utilise les indicateurs PRÉFILTRÉS (FLT_*) : le filtre prs_rem_typ est déjà intégré. Pour le C2S et l'Alsace-Moselle, il faut les indicateurs BRUTS (PRS_*) car les FLT_* ne les portent pas.",
+  "note_taux": "IMPORTANT : 'taux de remboursement RO' = montant remboursé / dépense engagée (ancien 'taux de couverture', renommé). 'taux de remboursement (AM)' = PRS_REM_TAU, le taux légal par acte (65%, 100%…) défini par l'Assurance Maladie. Les deux sont distincts."
+ },
+ "_grille_lecture": {
+  "but": "Ce dictionnaire relie le langage métier aux données Open DAMIR. Il sert au routage de l'assistant (choix d'outil + paramètres) et de garde-fou.",
+  "comment_lire": [
+   "perimetre : ce que l'assistant couvre (2022-2025) vs la base complète (depuis 2009, 56 variables).",
+   "variables_open_damir : les 56 variables officielles, par catégorie. Référence exhaustive.",
+   "modalites_cles : les valeurs possibles des variables les plus utiles au requêtage.",
+   "mesures / dimensions : ce qu'on calcule et selon quels axes.",
+   "postes : les postes de soin navigables, avec filtre et synonymes (cœur du routage).",
+   "themes_specifiques : sujets transverses requêtables (C2S, Alsace-Moselle, vaccins, ALD, prévention).",
+   "granularite_prestations : les 3 niveaux de requêtage (macro → sous-catégorie → prs_nat).",
+   "catalogue_sous_categories : les valeurs valides de sous_categorie_cor (niveau 2).",
+   "decoupages_fins : distinctions fines au niveau prs_nat (verres/montures) — sans colonne ajoutée.",
+   "glossaire : définitions vulgarisées pour l'outil 'définition'.",
+   "hors_perimetre : déclencheurs de refus.",
+   "capacites_reponse : types de réponse (valeur, tableau, série, visuel) — évolution prévue."
+  ],
+  "priorite_termes": "Pour identifier un terme : chercher d'abord dans postes.synonymes, puis themes_specifiques, puis glossaire. Les 'mots_exclus' de hors_perimetre priment (refus).",
+  "convention_cles": "Chaque entrée requêtable porte un objet 'filtre' {colonne, valeur} ou 'variables' [..]. Les clés préfixées '_' sont des notes, pas des données."
+ },
+ "perimetre": {
+  "assistant_v1": {
+   "annees": "2022-2025",
+   "raison": "périmètre volontairement restreint pour la v1 ; migration 2015-2025 puis 2009 prévue ensuite."
+  },
+  "base_complete": {
+   "depuis": "2009",
+   "nb_variables": 61,
+   "granularite": "une ligne = un agrégat mensuel par croisement de dimensions"
+  },
+  "sources": [
+   "Open DAMIR (CNAM, tous régimes)",
+   "Open Medic (médicaments)",
+   "Open LPP (dispositifs)"
+  ],
+  "inclus": "Part Assurance Maladie Obligatoire (AMO), tous régimes.",
+  "exclus": "Part des complémentaires (AMC / mutuelles) — hors périmètre par nature.",
+  "note_evolution": "À la migration temporelle, mettre à jour perimetre.assistant_v1.annees et rejouer les tests de non-régression."
+ },
+ "tables": {
+  "damia_fact_hist": {
+   "description": "Table de faits agrégée des remboursements de l'Assurance Maladie, tous régimes confondus. Une ligne = une combinaison unique de dimensions (période, prestation, bénéficiaire...). Les montants sont déjà sommés (GROUP BY).",
+   "grain": "soi_ann × soi_moi × prs_nat × dimensions bénéficiaire/exécutant",
+   "filtre_obligatoire_global": "prs_rem_typ IN (0,1) pour la part légale AMO sur les montants remboursés"
+  },
+  "dim_prestations": {
+   "description": "Table de dimension décrivant chaque prestation (clé prs_nat). Contient la classification métier en macro-catégories et sous-catégories, ainsi que les flags paniers santé.",
+   "cle": "prs_nat"
+  },
+  "correspondance_ATC": {
+   "description": "Table de correspondance hiérarchique des médicaments (classification ATC). Trois niveaux : ATC1 (groupe anatomique), ATC2 (thérapeutique), ATC3 (pharmacologique).",
+   "cle": "code_atc3"
+  }
+ },
+ "variables_open_damir": {
+  "_note": "Les 61 variables de la base complète, par catégorie. L'assistant V1 en exploite un sous-ensemble.",
+  "periode": {
+   "SOI_ANN": {
+    "libelle": "Année de Soins",
+    "categorie": "PERIODE",
+    "commentaire": ""
+   },
+   "SOI_MOI": {
+    "libelle": "Mois de Soins",
+    "categorie": "PERIODE",
+    "commentaire": ""
+   }
+  },
+  "beneficiaire": {
+   "AGE_BEN_SNDS": {
+    "libelle": "Tranche d'Age Bénéficiaire au moment des soins",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": "L’âge du bénéficiaire au moment des soins est calculé ainsi : (Année/Mois de début des soins) – (Année/Mois de naissance du bénéficiaire). Il est ensuite regroupé en tranche d’âge"
+   },
+   "BEN_CMU_TOP": {
+    "libelle": "Top Bénéficiaire CMU-C",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": "Jusqu'àu mois de mars 2021,vaut ‘1’ (=‘OUI’) si la prestation qui a fait l’objet du remboursement est prise en charge au titre de la CMU-Complémentaire ET si cette prestation n’est pas exonérée du ticket modérateur pour un autre motif (exemple : ALD) car ce dernier prime sur le TOP CMU-C pour le remboursement de la prestation. A partir d'avril 2021,vaut ‘1’ (=‘OUI’) si la prestation qui a fait l’o"
+   },
+   "BEN_QLT_COD": {
+    "libelle": "Qualité du Bénéficiaire",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": ""
+   },
+   "BEN_RES_REG": {
+    "libelle": "Région de Résidence du Bénéficiaire à partir de 2015 (tables A)",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": ""
+   },
+   "BEN_RES_ZEAT": {
+    "libelle": "ZEAT de Résidence du Bénéficiaire  jusqu'à 2014 (tables P)",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": ""
+   },
+   "BEN_SEX_COD": {
+    "libelle": "Sexe du Bénéficiaire",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": ""
+   },
+   "MTM_NAT": {
+    "libelle": "Modulation du Ticket Modérateur",
+    "categorie": "BENEFICIAIRE",
+    "commentaire": ""
+   }
+  },
+  "prestation": {
+   "ASU_NAT": {
+    "libelle": "Nature d'Assurance",
+    "categorie": "PRESTATION",
+    "commentaire": ""
+   },
+   "ATT_NAT": {
+    "libelle": "Nature de l'Accident du Travail",
+    "categorie": "PRESTATION",
+    "commentaire": ""
+   },
+   "CPL_COD": {
+    "libelle": "Complément d'Acte",
+    "categorie": "PRESTATION",
+    "commentaire": "Uniquement des compléments d'actes Nuit, Férié, Urgences"
+   },
+   "CPT_ENV_TYP": {
+    "libelle": "Type d'Enveloppe",
+    "categorie": "PRESTATION",
+    "commentaire": "Le type d’enveloppe = 1 correspond aux dépenses de soins de ville. Il s’agit des honoraires et des prescriptions des professionnels de santé libéraux :\n• Les honoraires et prescriptions des cabinets de ville;\n• Les honoraires et prescriptions des cliniques privées;\n• Les honoraires er prescriptions des centres de santé.\n\nLe type d’enveloppe = 2 correspond aux versements aux établissements de santé"
+   },
+   "DRG_AFF_NAT": {
+    "libelle": "Nature du Destinataire de Règlement affiné",
+    "categorie": "PRESTATION",
+    "commentaire": ""
+   },
+   "ETE_IND_TAA": {
+    "libelle": "Indicateur TAA Privé/Public",
+    "categorie": "PRESTATION",
+    "commentaire": "La dimension « Indicateur TAA » permet de cibler les prestations en facturation directe à l’Assurance maladie : Actes et Consultations Externes. Pour les cibler, il faut prendre l'indicateur TAA public."
+   },
+   "EXO_MTF": {
+    "libelle": "Motif d'Exonération du Ticket Modérateur",
+    "categorie": "PRESTATION",
+    "commentaire": "Pour connaitre les bénéficiaires en ALD, il faut prendre les EXO_MTF = 41 à 46."
+   },
+   "PRS_FJH_TYP": {
+    "libelle": "Type de Prise en Charge Forfait Journalier",
+    "categorie": "PRESTATION",
+    "commentaire": ""
+   },
+   "PRS_NAT": {
+    "libelle": "Nature de Prestation",
+    "categorie": "PRESTATION",
+    "commentaire": "Permet de distinguer chaque acte principal de ses majorations."
+   },
+   "PRS_PDS_QCP": {
+    "libelle": "Code Qualificatif Parcours de Soins (sortie)",
+    "categorie": "PRESTATION",
+    "commentaire": ""
+   },
+   "PRS_PPU_SEC": {
+    "libelle": "Code Secteur Privé/Public",
+    "categorie": "PRESTATION",
+    "commentaire": ""
+   },
+   "PRS_REM_TAU": {
+    "libelle": "Taux de Remboursement",
+    "categorie": "PRESTATION",
+    "commentaire": "Le « Taux de remboursement » contient le taux qui est utilisé pour calculer le montant remboursé."
+   },
+   "PRS_REM_TYP": {
+    "libelle": "Type de Remboursement",
+    "categorie": "PRESTATION",
+    "commentaire": "Pour prendre en compte les parts légales, il faut utiliser PRS_REM_TYP = 0 ou 1, les autres valeurs concernent les parts supplémentaires (voir modalités ci-contre)."
+   }
+  },
+  "executant": {
+   "DDP_SPE_COD": {
+    "libelle": "Discipline de Prestation Etb Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "ETE_CAT_SNDS": {
+    "libelle": "Catégorie Etb Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "ETE_REG_COD": {
+    "libelle": "Région d'Implantation Etb Exécutant à partir de 2015 (tables A)",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "ETE_TYP_SNDS": {
+    "libelle": "Type Etb Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "ETE_ZEAT_COD": {
+    "libelle": "ZEAT d'Implantation Etb Exécutant  jusqu'à 2014 (tables P)",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "EXE_INS_REG": {
+    "libelle": "Région du PS Exécutant à partir de 2015 (tables A)",
+    "categorie": "EXECUTANT",
+    "commentaire": "Informe de la région d’exécution de la prestation par un professionnel de santé dans un cabinet qu’il soit principal ou secondaire."
+   },
+   "EXE_INS_ZEAT": {
+    "libelle": "ZEAT du PS Exécutant  jusqu'à 2014 (tables P)",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "MDT_TYP_COD": {
+    "libelle": "Mode de Traitement Etb Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "MFT_COD": {
+    "libelle": "Mode de Fixation des Tarifs Etb Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "PSE_ACT_CAT": {
+    "libelle": "Catégorie de l' Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": ""
+   },
+   "PSE_ACT_SNDS": {
+    "libelle": "Nature d'Activité PS Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": "Renseignée pour les professions de santé non médicales (attention aux dentistes présents en nature d'activité 19, 53, 54 et spécialité médicale 36)"
+   },
+   "PSE_SPE_SNDS": {
+    "libelle": "Spécialité Médicale PS Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": "Renseigné pour les professions médicales (attention aux dentistes présents en nature d'activité 19, 53, 54 et spécialité médicale 36)"
+   },
+   "PSE_STJ_SNDS": {
+    "libelle": "Statut Juridique PS Exécutant",
+    "categorie": "EXECUTANT",
+    "commentaire": "L’objet « Statut juridique du PS Exécutant » est renseigné uniquement pour les données liquidées par les régimes RG et infogérées, il vaut ’90’ (= valeur inconnue) pour les autres."
+   }
+  },
+  "prescripteur": {
+   "ETP_CAT_SNDS": {
+    "libelle": "Catégorie Etb Prescripteur",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": ""
+   },
+   "ETP_REG_COD": {
+    "libelle": "Région d'Implantation Etb Prescripteur à partir de 2015 (tables A)",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": ""
+   },
+   "ETP_ZEAT_COD": {
+    "libelle": "ZEAT d'Implantation Etb Prescripteur  jusqu'à 2014 (tables P)",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": ""
+   },
+   "PRE_INS_REG": {
+    "libelle": "Région du PS Prescripteur à partir de 2015 (tables A)",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": "Informe de la région de prescription de la prestation par un professionnel de santé dans un cabinet qu’il soit principal ou secondaire."
+   },
+   "PRE_INS_ZEAT": {
+    "libelle": "ZEAT du PS Prescripteur jusqu'à 2014 (tables P)",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": ""
+   },
+   "PSP_ACT_CAT": {
+    "libelle": "Catégorie du Prescripteur",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": ""
+   },
+   "PSP_ACT_SNDS": {
+    "libelle": "Nature d'Activité PS Prescripteur",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": "Renseignée pour les professions de santé non médicales (attention aux dentistes présents en nature d'activité 19, 53, 54 et spécialité médicale 36)"
+   },
+   "PSP_SPE_SNDS": {
+    "libelle": "Spécialité Médicale PS Exécutant",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": "Renseigné pour les professions médicales (attention aux dentistes présents en nature d'activité 19, 53, 54 et spécialité médicale 36)"
+   },
+   "PSP_STJ_SNDS": {
+    "libelle": "Statut Juridique PS Prescripteur",
+    "categorie": "PRESCRIPTEUR",
+    "commentaire": "L’objet « Statut juridique du PS Perscripteur » est renseigné uniquement pour les données liquidées par les régimes RG et infogérées, il vaut ’90’ (= valeur inconnue) pour les autres."
+   }
+  },
+  "organisme": {
+   "ORG_CLE_REG": {
+    "libelle": "Région de l'Organisme de Liquidation à partir de 2015 (tables A)",
+    "categorie": "ORGANISME",
+    "commentaire": "Région de l'organisme qui « liquide », c’est-à-dire qui effectue le remboursement des prestations pour les bénéficiaires qui lui sont affiliés, mais aussi, éventuellement, pour des bénéficiaires affiliés dans d’autres organismes :\nCas des cures thermales liquidées sur le lieu d’implantation de l’établissement, quelle que soit l’affiliation du bénéficiaire, cas des caisses des DOM (hors Guadeloupe)"
+   },
+   "ORG_CLE_ZEAT": {
+    "libelle": "ZEAT de l'Organisme de Liquidation jusqu'à 2014 (tables P)",
+    "categorie": "ORGANISME",
+    "commentaire": ""
+   }
+  },
+  "indicateurs_bruts": {
+   "PRS_ACT_COG": {
+    "libelle": "Coefficient Global",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Indicateurs bruts destinés aux utilisateurs avertis des données, qui maitrisent les filtres sur les types de remboursement : \n- filtre impératif sur type de remboursement = 0 pour  comptabiliser les prestations sans doublon de type de remboursement puisque la totalité du coefficient global se trouve au sein de la modalité 0\n- filtre sur un type de remboursement <> 0 (choisir la valeur de la modali"
+   },
+   "PRS_ACT_NBR": {
+    "libelle": "Dénombrement",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Indicateurs bruts destinés aux utilisateurs avertis des données, qui maitrisent les filtres sur les types de remboursement : \n- filtre impératif sur type de remboursement = 0 pour  comptabiliser les prestations sans doublon de type de remboursement puisque la totalité du dénombrement se trouve au sein de la modalité 0\n- filtre sur un type de remboursement <> 0 (choisir la valeur de la modalité en "
+   },
+   "PRS_ACT_QTE": {
+    "libelle": "Quantité",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Indicateurs bruts destinés aux utilisateurs avertis des données, qui maitrisent les filtres sur les types de remboursement : \n- filtre impératif sur type de remboursement = 0 pour  comptabiliser les prestations sans doublon de type de remboursement puisque la totalité de la quantité se trouve au sein de la modalité 0\n- filtre sur un type de remboursement <> 0 (choisir la valeur de la modalité en f"
+   },
+   "PRS_DEP_MNT": {
+    "libelle": "Montant du Dépassement",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Indicateurs bruts destinés aux utilisateurs avertis des données, qui maitrisent les filtres sur les types de remboursement : \n- filtre impératif sur type de remboursement = 0 pour  comptabiliser les prestations sans doublon de type de remboursement puisque la totalité du dépassement se trouve au sein de la modalité 0\n- filtre sur un type de remboursement <> 0 (choisir la valeur de la modalité en f"
+   },
+   "PRS_PAI_MNT": {
+    "libelle": "Montant de la Dépense",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Indicateurs bruts destinés aux utilisateurs avertis des données, qui maitrisent les filtres sur les types de remboursement : \n- filtre impératif sur type de remboursement = 0 pour  comptabiliser les prestations sans doublon de type de remboursement puisque la totalité de la dépense se trouve au sein de la modalité 0\n- filtre sur un type de remboursement <> 0 (choisir la valeur de la modalité en fo"
+   },
+   "PRS_REM_BSE": {
+    "libelle": "Base de Remboursement",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Cet indicateur peut s'utiliser sans filtres sur le type de remboursement. Dans ce cas, il s'agit de la base de remboursement des prestations légales d'Assurance Maladie (0,1) et des parts supplémentaires (>=2). Il peut également être filtré sur le type de remboursement (PRS_REM_TYP) selon la base de remboursement que vous souhaitez cibler.\n\nLa base de remboursement correspond au montant de la base"
+   },
+   "PRS_REM_MNT": {
+    "libelle": "Montant Versé/Remboursé",
+    "categorie": "INDICATEURS BRUTS",
+    "commentaire": "Cet indicateur peut s'utiliser sans filtres sur le type de remboursement. Dans ce cas, il s'agit du montant remboursé des prestations légales d'Assurance Maladie (0,1) et des parts supplémentaires (>=2). Il peut également être filtré sur le type de remboursement (PRS_REM_TYP) selon le montant remboursé que vous souhaitez cibler.\n\nLe montant remboursé correspond au montant payé par l'Assurance Mala"
+   }
+  },
+  "indicateurs_prefiltres": {
+   "FLT_ACT_COG": {
+    "libelle": "Coefficient Global de la Prestation Préfiltré",
+    "categorie": "INDICATEURS PREFILTRES",
+    "commentaire": "Le coefficient global est préfiltré sur le type de remboursement (PRS_REM_TYP) 0, il contient déjà le coefficient global de tous les types de remboursement.\n \nNB : Si ce filtre n'est pas fait, les coefficients seront doublés.\n\nIl représente un volume : quantité x coefficient tarifé de l'acte."
+   },
+   "FLT_ACT_NBR": {
+    "libelle": "Dénombrement de la Prestation Préfiltré",
+    "categorie": "INDICATEURS PREFILTRES",
+    "commentaire": "Le dénombrement est préfiltré sur le type de remboursement (PRS_REM_TYP) 0, il contient déjà le dénombrement de tous les types de remboursement.\n \nNB : Si ce filtre n'est pas fait, les dénombrements seront doublés.\n\nAttention, il faut privilégier la quantité au dénombrement. En effet, les données du dénombrement ne sont pas remontées pour l’ensemble des régimes (elles sont remontées pour le régime"
+   },
+   "FLT_ACT_QTE": {
+    "libelle": "Quantité de la Prestation Préfiltrée",
+    "categorie": "INDICATEURS PREFILTRES",
+    "commentaire": "La quantité est préfiltrée sur le type de remboursement (PRS_REM_TYP) 0, elle contient déjà la quantité de tous les types de remboursement.\n \nNB : Si ce filtre n'est pas fait, les quantités seront doublées.\n\nPour compter des actes, il faut utiliser la variable « quantité d’actes ». Elle sert à tarifer et à calculer le remboursement selon la formule suivante : \nMontant remboursé = base de rembourse"
+   },
+   "FLT_DEP_MNT": {
+    "libelle": "Montant du Dépassement de la Prestation Préfiltré",
+    "categorie": "INDICATEURS PREFILTRES",
+    "commentaire": "Le montant du dépassement est préfiltré sur le type de remboursement (PRS_REM_TYP) 0, il contient déjà la dépassement de tous les types de remboursement.\n \nNB : Si ce filtre n'est pas fait, les montants seront doublés.\n\nLe montant de dépassement concerne uniquement du dépassement d’honoraires de médecins, il est non alimenté lorsqu’il s’agit de produits et prestations (LPP). Dans ce dernier cas, i"
+   },
+   "FLT_PAI_MNT": {
+    "libelle": "Montant de la Dépense de la Prestation Préfiltrée",
+    "categorie": "INDICATEURS PREFILTRES",
+    "commentaire": "Le montant de la dépense est préfiltré sur le type de remboursement (PRS_REM_TYP) 0, il contient déjà la dépense de tous les types de remboursement.\n \nNB : Si ce filtre n'est pas fait, les montants seront doublés.\n\nLe montant de la dépense correspond au montant payé par le patient, donc les honoraires du professionnel de santé."
+   },
+   "FLT_REM_MNT": {
+    "libelle": "Montant Versé/Remboursé Préfiltré",
+    "categorie": "INDICATEURS PREFILTRES",
+    "commentaire": "Le montant remboursé est préfiltré sur le type de remboursement (PRS_REM_TYP) 0 ou 1, c'est à dire qu'il s'agit du montant remboursé de la part légale de l'Assurance Maladie."
+   }
+  },
+  "periode_de_traitement": {
+   "FLX_ANN_MOI": {
+    "libelle": "Année et Mois de Traitement",
+    "categorie": "PERIODE DE TRAITEMENT",
+    "commentaire": "Date technique qui correspond à la date de chargement des flux arrivés dans l’entrepôt émanant de tous les organismes et régimes depuis le dernier chargement"
+   }
+  },
+  "top_ps5": {
+   "TOP_PS5_TRG": {
+    "libelle": "Top Périmètre hors CMU C et prestations pour information",
+    "categorie": "TOP PS5",
+    "commentaire": "Ce top permet de se re-situer sur le périmètre de la Statistique Mensuelle en tous régimes => TOP_PS5_TRG = 1"
+   }
+  }
+ },
+ "modalites_cles": {
+  "_note": "Valeurs possibles des variables les plus utiles au requêtage. Source : descriptif CNAM.",
+  "PRS_REM_TYP": {
+   "libelle": "Type de Remboursement",
+   "modalites": {
+    "0": "PRESTATION DE REFERENCE",
+    "1": "COMPLEMENT D ACTE",
+    "2": "TICKET MODERATEUR HORS C2S",
+    "3": "SUPPLEMENT HORS ALSACE MOSELLE",
+    "4": "SUPPLEMENT ALSACE MOSELLE",
+    "5": "TICKET MODERATEUR  C2S",
+    "6": "FORFAIT C2S",
+    "7": "AME",
+    "10": "Part oc ACS",
+    "11": "PART SPECIFIQUE CRPCEN",
+    "12": "PART SPECIFIQUE CANSSM",
+    "13": "TICKET MODERATEUR MAYOTTE",
+    "99": "VALEUR INCONNUE"
+   }
+  },
+  "CPT_ENV_TYP": {
+   "libelle": "Type d'Enveloppe",
+   "modalites": {
+    "0": "PRESTATIONS NON PRISE EN CHARGE PAR LE RG",
+    "1": "SOINS DE VILLE",
+    "2": "HOSPITALISATION ET MEDICO-SOCIALE ET CONSOMMATIONS INTERMEDIAIRES (MEDICAMENTS ET LPP)",
+    "3": "PRESTATIONS LEGALES ASSURANCE MALADIE HORS ENV.ONDAM",
+    "4": "PREVENTION",
+    "5": "FNAS",
+    "6": "IVG (VALEUR SUPPRIMEE)",
+    "7": "C2S, AME ou ACS",
+    "8": "ALSACE MOSELLE",
+    "9": "VALEUR INCONNUE",
+    "98": "SANS OBJET"
+   }
+  },
+  "EXO_MTF": {
+   "libelle": "Motif d'Exonération du Ticket Modérateur",
+   "modalites": {
+    "0": "SANS OBJET",
+    "10": "ASSURANCE",
+    "20": "REGIMES",
+    "21": "PENSION MILITAIRE D'INVALIDITE (ART. 115)",
+    "30": "NATURE DE PRESTATION",
+    "41": "BENEFICIAIRE ATTEINT D UNE MALADIE LISTE - AFFECTION SANS RAPPORT",
+    "42": "BENEFICIAIRE ATTEINT D UNE MALADIE LISTE - AFFECTION EN  RAPPORT",
+    "43": "PATHOLOGIE HORS LISTE - AFFECTION SANS RAPPORT",
+    "44": "PATHOLOGIE HORS LISTE - AFFECTION EN RAPPORT",
+    "45": "POLYPATHOLOGIE HORS LISTE - AFFECTION SANS RAPPORT",
+    "46": "POLYPATHOLOGIE HORS LISTE - AFFECTION EN RAPPORT",
+    "47": "ARTICLE L324 NON EXONERANT (SAUF TRANSPORTS)",
+    "51": "COEFFICIENT ET ACTE EN RAPPORT",
+    "54": "DIAGNOSTIC ET TRAITEMENT DE LA STERILITE",
+    "55": "6EME MOIS DE GROSSESSE",
+    "56": "EDUCATION SPECIALISEE SANS RAPPORT",
+    "57": "EDUCATION SPECIALISEE EN RAPPORT",
+    "62": "AUTRE CAS D EXONERATION",
+    "63": "HOSPIT PLUS 30 JOURS",
+    "81": "PREVENTION",
+    "82": "PREVENTION SOINS DE SUITE BUCCO-DENTAIRE",
+    "91": "ACTES CCAM/NGAP EXONERANTS",
+    "92": "SOINS EN RAPPORT AVEC UN ACTE CCAM EXONERANT",
+    "99": "VALEUR INCONNUE"
+   }
+  },
+  "MDT_TYP_COD": {
+   "libelle": "Mode de Traitement Etb Exécutant",
+   "modalites": {
+    "1": "SEJOURNE",
+    "2": "EXTERNE",
+    "3": "DOMICILE",
+    "9": "SANS OBJET"
+   }
+  },
+  "PSE_STJ_SNDS": {
+   "libelle": "Statut Juridique PS Exécutant",
+   "modalites": {
+    "1": "PROFESSIONS LIBERALES",
+    "2": "PRATICIENS EXERCANT A TITRE SALARIE",
+    "8": "PRATICIENS FICTIFS",
+    "9": "VALEUR INCONNUE"
+   }
+  },
+  "ASU_NAT": {
+   "libelle": "Nature d'Assurance",
+   "modalites": {
+    "0": "SANS OBJET",
+    "10": "MALADIE",
+    "11": "\"MALADIE COURS NAVIGATION > 6 MOIS\"",
+    "12": "\"MALADIE COURS NAVIGATION < 6 MOIS\"",
+    "22": "SOINS AUX INVALIDES DE GUERRE (CNMSS)",
+    "30": "MATERNITE",
+    "40": "AT ET MP",
+    "50": "DECES",
+    "70": "PRESTATIONS SUPPLEMENTAIRES",
+    "80": "INVALIDITE",
+    "90": "PREVENTION MALADIE",
+    "99": "VALEUR INCONNUE"
+   }
+  },
+  "MTM_NAT": {
+   "libelle": "Modulation du Ticket Modérateur",
+   "modalites": {
+    "0": "SANS OBJET",
+    "1": "BENEFICIAIRES DE L'ALLOCATION DE SOLIDARITE AUX PERSONNES AGEES OU DE L'ALLOCATION SUPPLEMENTAIRE D'INVALIDITE",
+    "2": "REGIME LOCAL ALSACE MOSELLE",
+    "3": "REGIME LOCAL FRONTALIER",
+    "4": "REGIME LOCAL ET FONDS NATIONAL DE SOLIDARITE",
+    "5": "SOINS A L ETRANGER (REGIME MILITAIRE)",
+    "9": "VALEUR INCONNUE"
+   }
+  },
+  "BEN_CMU_TOP": {
+   "libelle": "Top Bénéficiaire CMU-C",
+   "modalites": {
+    "0": "Non bénéficiaire de la C2S",
+    "1": "Bénéficiaire de la C2S",
+    "2": "Sans Objet",
+    "9": "VALEUR INCONNUE"
+   }
+  },
+  "PRS_PDS_QCP": {
+   "libelle": "Code Qualificatif Parcours de Soins (sortie)",
+   "modalites": {
+    "0": "SANS OBJET",
+    "1": "L'EXECUTANT EST LE MEDECIN TRAITANT DECLARE",
+    "2": "NOUVEAU MEDECIN TRAITANT DECLARE",
+    "3": "PATIENT ORIENTE PAR UN MT",
+    "4": "ACTES EN ACCES DIRECT SPECIFIQUE AVEC MEDECIN TRAITANT DECLARE",
+    "5": "URGENCE AVEC MEDECIN TRAITANT DECLARE",
+    "6": "HORS RESIDENCE HABITUELLE",
+    "7": "MEDECIN TRAITANT REMPLACE AVEC MEDECIN TRAITANT DECLARE",
+    "8": "ACTE EN RAPPORT AVEC ART. D162.1.6 DU CODE DE LA SS (TABACOLOGIE, ALCOOLOGIE, TOXICOMANIE)",
+    "10": "GENERALISTE INSTALLE DEPUIS MOINS DE 5 ANS DANS UNE ZONE DEFICITAIRE",
+    "11": "CABINET SECONDAIRE DU MEDECIN TRAITANT DECLARE",
+    "12": "GENERALISTE PRIMO INSTALLE DEPUIS MOINS DE 5 ANS",
+    "13": "EXCLUSION TEMPORAIRE AVEC MEDECIN TRAITANT DECLARE",
+    "21": "TOLERANCE DEJA ENREGISTREE",
+    "22": "PARCOURS DE SOINS NON RENSEIGNE PAR EXECUTANT DIFFERENT MEDECIN TRAITANT DECLARE",
+    "23": "HORS COORDINATION DES SOINS, AVEC MEDECIN TRAITANT DECLARE",
+    "24": "HORS COORDINATION DES SOINS SANS MEDECIN TRAITANT DECLARE",
+    "25": "URGENCE SANS MEDECIN TRAITANT DECLARE",
+    "26": "SPECIALITE HORS ACCES DIRECT AVEC MEDECIN TRAITANT DECLARE",
+    "27": "EXCLUSION TEMPORAIRE SANS MEDECIN TRAITANT DECLARE",
+    "28": "ACTES HORS ACCES DIRECT SPECIFIQUE AVEC MEDECIN TRAITANT DECLARE",
+    "31": "EXCLUS DU PARCOURS DE SOINS",
+    "32": "EXCLUSION DES BENEFICIAIRES AFFILIES AU REGIME DE LA CSS DE MAYOTTE (976) - REGIME MAHORAIS",
+    "33": "EXCLUSION DES BENEFICIAIRES DE MOINS DE 16 ANS AVEC MT DECLARE A LA DATE DES SOINS",
+    "34": "EXCLUSION DES BENEFICIAIRES DE MOINS DE 16 ANS SANS MT DECLARE A LA DATE DES SOINS",
+    "99": "VALEUR INCONNUE"
+   }
+  },
+  "BEN_QLT_COD": {
+   "libelle": "Qualité du Bénéficiaire",
+   "modalites": {
+    "0": "Sans objet (RSI)",
+    "1": "ASSURE",
+    "2": "CONJOINT ET ASSIMILE",
+    "3": "ENFANT",
+    "4": "AUTRE AYANT-DROIT",
+    "9": "VALEUR INCONNUE"
+   }
+  },
+  "AGE_BEN_SNDS": {
+   "libelle": "Tranche d'Age Bénéficiaire au moment des soins",
+   "modalites": {
+    "0": "0-19 ANS",
+    "20": "20 - 29 ANS",
+    "30": "30 - 39 ANS",
+    "40": "40 - 49 ANS",
+    "50": "50 - 59 ANS",
+    "60": "60 - 69 ANS",
+    "70": "70 - 79 ANS",
+    "80": "80 ANS ET +",
+    "99": "AGE INCONNU"
+   }
+  },
+  "BEN_SEX_COD": {
+   "libelle": "Sexe du Bénéficiaire",
+   "modalites": {
+    "0": "INCONNU OU PERSONNE MORALE SANS CIVILITE",
+    "1": "MASCULIN",
+    "2": "FEMININ",
+    "9": "VALEUR INCONNUE"
+   }
+  }
+ },
+ "mesures": {
+  "montant_rembourse": {
+   "label": "Montant remboursé (RO)",
+   "definition": "Montant versé par l'Assurance Maladie obligatoire.",
+   "colonne_flt": "FLT_REM_MNT",
+   "colonne_brute": "PRS_REM_MNT",
+   "unite": "euros",
+   "synonymes": [
+    "remboursé",
+    "montant remboursé",
+    "versé",
+    "pris en charge par la Sécu",
+    "montant RO",
+    "dépense AMO"
+   ]
+  },
+  "base_remboursement": {
+   "label": "Base de remboursement",
+   "definition": "Assiette (tarif de convention) sur laquelle s'applique le taux de remboursement.",
+   "colonne_brute": "PRS_REM_BSE",
+   "unite": "euros",
+   "synonymes": [
+    "base",
+    "base de remboursement",
+    "tarif de convention",
+    "assiette"
+   ]
+  },
+  "depense_engagee": {
+   "label": "Dépense engagée",
+   "definition": "Dépense réelle totale, dépassements inclus.",
+   "colonne_flt": "FLT_PAI_MNT",
+   "colonne_brute": "PRS_PAI_MNT",
+   "unite": "euros",
+   "synonymes": [
+    "dépense",
+    "dépense engagée",
+    "coût réel",
+    "dépense totale",
+    "montant payé"
+   ]
+  },
+  "montant_depassement": {
+   "label": "Montant du dépassement",
+   "definition": "Part de la dépense au-delà du tarif de convention.",
+   "colonne_flt": "FLT_DEP_MNT",
+   "colonne_brute": "PRS_DEP_MNT",
+   "unite": "euros",
+   "synonymes": [
+    "dépassement",
+    "dépassement d'honoraires",
+    "au-delà du tarif"
+   ]
+  },
+  "nombre_actes": {
+   "label": "Nombre d'actes",
+   "definition": "Dénombrement / quantité de prestations.",
+   "colonne_flt": "FLT_ACT_QTE",
+   "colonne_brute": "PRS_ACT_QTE",
+   "unite": "nombre",
+   "synonymes": [
+    "actes",
+    "nombre d'actes",
+    "volume",
+    "quantité",
+    "nombre de prestations",
+    "boîtes"
+   ]
+  },
+  "taux_remboursement_ro": {
+   "label": "Taux de remboursement RO",
+   "definition": "Part de la dépense réelle prise en charge par l'AMO (dépassements inclus).",
+   "calcul": "montant_rembourse / depense_engagee",
+   "unite": "pourcentage",
+   "synonymes": [
+    "taux de remboursement RO",
+    "taux RO",
+    "part remboursée",
+    "pourcentage pris en charge",
+    "combien c'est remboursé",
+    "niveau de prise en charge"
+   ],
+   "note": "Anciennement nommé 'taux de couverture'. NE PAS confondre avec le taux de remboursement AM (PRS_REM_TAU).",
+   "reste_a_charge": "Le reste à charge avant complémentaire = depense_engagee - montant_rembourse (complément du taux RO)."
+  },
+  "taux_remboursement_am": {
+   "label": "Taux de remboursement (Assurance Maladie)",
+   "definition": "Taux légal appliqué par acte, défini par l'Assurance Maladie (ex. 65 %, 70 %, 100 %). Contient la part légale de prise en charge.",
+   "colonne": "PRS_REM_TAU",
+   "unite": "pourcentage",
+   "synonymes": [
+    "taux légal",
+    "taux de remboursement Sécu",
+    "taux officiel",
+    "taux de prise en charge légal"
+   ],
+   "note": "Variable de PRESTATION (par ligne), à distinguer du taux de remboursement RO qui est un ratio calculé."
+  }
+ },
+ "dimensions": {
+  "annee": {
+   "label": "Année de soins",
+   "colonne": "SOI_ANN",
+   "synonymes": [
+    "année",
+    "an",
+    "par an",
+    "annuel"
+   ]
+  },
+  "mois": {
+   "label": "Mois de soins",
+   "colonne": "SOI_MOI",
+   "synonymes": [
+    "mois",
+    "mensuel",
+    "par mois"
+   ]
+  },
+  "region": {
+   "label": "Région de résidence du bénéficiaire",
+   "colonne": "ben_res_reg",
+   "synonymes": [
+    "région",
+    "regions",
+    "territoire",
+    "géographie",
+    "par région",
+    "département"
+   ],
+   "modalites": {
+    "5": {
+     "libelle": "Régions et Départements d'outre-mer",
+     "synonymes": [
+      "outre-mer",
+      "dom",
+      "drom",
+      "dom-tom",
+      "ultramarin"
+     ]
+    },
+    "11": {
+     "libelle": "Île-de-France",
+     "synonymes": [
+      "ile de france",
+      "idf",
+      "paris",
+      "region parisienne"
+     ]
+    },
+    "24": {
+     "libelle": "Centre-Val de Loire",
+     "synonymes": [
+      "centre val de loire",
+      "centre",
+      "val de loire"
+     ]
+    },
+    "27": {
+     "libelle": "Bourgogne-Franche-Comté",
+     "synonymes": [
+      "bourgogne",
+      "franche comte",
+      "bourgogne franche comte",
+      "bfc"
+     ]
+    },
+    "28": {
+     "libelle": "Normandie",
+     "synonymes": [
+      "normandie",
+      "normand"
+     ]
+    },
+    "32": {
+     "libelle": "Hauts-de-France",
+     "synonymes": [
+      "hauts de france",
+      "nord pas de calais",
+      "picardie",
+      "nord"
+     ]
+    },
+    "44": {
+     "libelle": "Grand Est",
+     "synonymes": [
+      "grand est",
+      "alsace",
+      "lorraine",
+      "champagne ardenne"
+     ]
+    },
+    "52": {
+     "libelle": "Pays de la Loire",
+     "synonymes": [
+      "pays de la loire",
+      "loire",
+      "nantes"
+     ]
+    },
+    "53": {
+     "libelle": "Bretagne",
+     "synonymes": [
+      "bretagne",
+      "breton",
+      "rennes"
+     ]
+    },
+    "75": {
+     "libelle": "Nouvelle-Aquitaine",
+     "synonymes": [
+      "nouvelle aquitaine",
+      "aquitaine",
+      "limousin",
+      "poitou charentes",
+      "bordeaux"
+     ]
+    },
+    "76": {
+     "libelle": "Occitanie",
+     "synonymes": [
+      "occitanie",
+      "languedoc",
+      "roussillon",
+      "midi pyrenees",
+      "toulouse"
+     ]
+    },
+    "84": {
+     "libelle": "Auvergne-Rhône-Alpes",
+     "synonymes": [
+      "auvergne rhone alpes",
+      "auvergne",
+      "rhone alpes",
+      "ara",
+      "lyon"
+     ]
+    },
+    "93": {
+     "libelle": "Provence-Alpes-Côte d'Azur et Corse",
+     "synonymes": [
+      "paca",
+      "provence",
+      "cote d azur",
+      "marseille",
+      "corse"
+     ]
+    },
+    "99": {
+     "libelle": "Inconnu",
+     "synonymes": [
+      "inconnu",
+      "non renseigne"
+     ]
+    }
+   },
+   "_note": "Libellés officiels CNAM (BEN_RES_REG). Les régions 75/76/93 suivent le découpage DAMIR."
+  },
+  "age": {
+   "label": "Tranche d'âge du bénéficiaire",
+   "colonne": "age_ben_snds",
+   "synonymes": [
+    "âge",
+    "age",
+    "tranche d'age",
+    "classe d'age",
+    "par age"
+   ],
+   "modalites": {
+    "0": {
+     "libelle": "0-19 ans",
+     "synonymes": [
+      "0-19",
+      "moins de 20",
+      "jeunes",
+      "enfants",
+      "mineurs",
+      "0 19 ans"
+     ]
+    },
+    "20": {
+     "libelle": "20-29 ans",
+     "synonymes": [
+      "20-29",
+      "vingtaine",
+      "jeunes adultes",
+      "20 29 ans"
+     ]
+    },
+    "30": {
+     "libelle": "30-39 ans",
+     "synonymes": [
+      "30-39",
+      "trentaine",
+      "30 39 ans"
+     ]
+    },
+    "40": {
+     "libelle": "40-49 ans",
+     "synonymes": [
+      "40-49",
+      "quarantaine",
+      "40 49 ans"
+     ]
+    },
+    "50": {
+     "libelle": "50-59 ans",
+     "synonymes": [
+      "50-59",
+      "cinquantaine",
+      "50 59 ans"
+     ]
+    },
+    "60": {
+     "libelle": "60-69 ans",
+     "synonymes": [
+      "60-69",
+      "soixantaine",
+      "60 69 ans"
+     ]
+    },
+    "70": {
+     "libelle": "70-79 ans",
+     "synonymes": [
+      "70-79",
+      "septuagenaires",
+      "70 79 ans"
+     ]
+    },
+    "80": {
+     "libelle": "80 ans et plus",
+     "synonymes": [
+      "80 et plus",
+      "80+",
+      "grand age",
+      "tres ages",
+      "80 ans et plus"
+     ]
+    },
+    "99": {
+     "libelle": "Âge inconnu",
+     "synonymes": [
+      "inconnu",
+      "non renseigne"
+     ]
+    }
+   },
+   "_note": "Attention : 'seniors' ou '60 ans et +' couvre plusieurs tranches (60,70,80) — l'assistant demande de préciser."
+  },
+  "sexe": {
+   "label": "Sexe du bénéficiaire",
+   "colonne": "ben_sex_cod",
+   "synonymes": [
+    "sexe",
+    "genre",
+    "par sexe",
+    "homme femme"
+   ],
+   "modalites": {
+    "1": {
+     "libelle": "Hommes",
+     "synonymes": [
+      "homme",
+      "hommes",
+      "masculin",
+      "male",
+      "h",
+      "garcon"
+     ]
+    },
+    "2": {
+     "libelle": "Femmes",
+     "synonymes": [
+      "femme",
+      "femmes",
+      "feminin",
+      "f",
+      "fille"
+     ]
+    },
+    "0": {
+     "libelle": "Inconnu ou personne morale",
+     "synonymes": [
+      "inconnu"
+     ]
+    },
+    "9": {
+     "libelle": "Valeur inconnue",
+     "synonymes": [
+      "non renseigne"
+     ]
+    }
+   }
+  },
+  "poste": {
+   "label": "Poste de soin (classification métier)",
+   "colonne": "macro_categorie / sous_categorie_cor",
+   "synonymes": [
+    "poste",
+    "type de soin",
+    "catégorie",
+    "domaine"
+   ]
+  }
+ },
+ "postes": {
+  "Optique": {
+   "sous_categorie": "Optique Médicale",
+   "couverture_amo_typique": "~2% (très faible)",
+   "note": "L'AMO couvre très peu l'optique ; l'essentiel est financé par les complémentaires. Dominée par le 100% Santé. Profil démographique : jeunes (0-19 ans). Reclassement effectué : bilans visuels et verres rattachés à l'optique.",
+   "macro_categorie": "Optique & Audioprothèse",
+   "sous_categorie_cor": "Optique Médicale",
+   "reclassement": "Codes 1100 (bilan visuel Muraine) et 3533 (verres CRPCEN) reclassés depuis 'Appareillages Sensoriels Divers' vers 'Optique Médicale'.",
+   "synonymes": [
+    "lunettes",
+    "vue",
+    "optique médicale",
+    "optique",
+    "optical",
+    "verre correcteur"
+   ],
+   "filtre": {
+    "colonne": "sous_categorie_cor",
+    "valeur": "Optique Médicale"
+   }
+  },
+  "Audioprothèse": {
+   "sous_categorie": "Audioprothèse",
+   "couverture_amo_typique": "~17% (faible, ~19% post-réforme 2021)",
+   "note": "Dominée par le panier libre (~68%). Profil démographique : seniors (70+ ans). Reclassement effectué : accessoires/piles/forfaits audio rattachés à l'audioprothèse. Pas de panier maîtrisé enregistré (C2S absent des données).",
+   "sous_categorie_cor": "Audioprothèse",
+   "reclassement": "Forfaits/accessoires audio rattachés à 'Audioprothèse'. Code 3534 (réparation) laissé dans 'Appareillages Sensoriels Divers'. Mesures audio filtrées sur 'Audioprothèse' seul.",
+   "synonymes": [
+    "audio",
+    "appareils auditifs",
+    "prothèses auditives",
+    "audition",
+    "aides auditives",
+    "audioprothèse",
+    "audioprothese",
+    "hearing",
+    "auditif"
+   ],
+   "filtre": {
+    "colonne": "sous_categorie_cor",
+    "valeur": "Audioprothèse"
+   }
+  },
+  "Dentaire": {
+   "macro_categorie": "Soins Dentaires & Orthodontie",
+   "sous_categories": [
+    "Soins Dentaires Conservateurs & Divers",
+    "Prothèse Dentaire (RAC 0)",
+    "Prothèse Dentaire (RAC Modéré)",
+    "Prothèse Dentaire (Tarif Libre/Autre)",
+    "Orthodontie"
+   ],
+   "couverture_amo_typique": "~28% (moyenne)",
+   "note": "Couverture contrastée : soins conservateurs bien remboursés (~45%), prothèses tarif libre mal remboursées (~18%). 3 paniers équilibrés. Profil bimodal (jeunes pour ortho + adultes pour prothèses).",
+   "synonymes": [
+    "dents",
+    "soins dentaires",
+    "prothèses dentaires",
+    "orthodontie",
+    "dentiste",
+    "dentaire",
+    "dental",
+    "teeth"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Soins Dentaires & Orthodontie"
+   }
+  },
+  "Pharmacie": {
+   "note": "Inclut pharmacie de ville et hospitalière. Croisement possible avec Open Medic (volumes, ATC) pour le détail médicaments.",
+   "synonymes": [
+    "médicaments",
+    "pharma",
+    "officine",
+    "boîtes",
+    "médicament",
+    "pharmacy"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Pharmacie"
+   }
+  },
+  "Hospitalisation": {
+   "macro_categorie": "Hospitalisation & Chirurgie",
+   "couverture_amo_typique": "élevée (l'hôpital est bien couvert par l'AMO)",
+   "synonymes": [
+    "hôpital",
+    "hospitalier",
+    "séjour hospitalier",
+    "clinique",
+    "hospitalisation",
+    "hospital",
+    "chirurgie hospitalière",
+    "chirurgie hospitaliere"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Hospitalisation & Chirurgie"
+   }
+  },
+  "_note_couverture": "Seuls 5 postes 'phares' sont détaillés ici (Optique, Audioprothèse, Dentaire, Pharmacie, Hospitalisation). Les données contiennent 18 macro-catégories. Tout poste demandé mais non détaillé ici (ex. médecine de ville, biologie, transport, soins infirmiers) doit être traité avec prudence : si le poste existe dans les données il peut être interrogé, sinon refus propre. Ne jamais inventer une couverture AMO non listée.",
+  "Imagerie": {
+   "macro_categorie": "Imagerie & Radiologie",
+   "synonymes": [
+    "imagerie",
+    "imaging",
+    "radiologie",
+    "radiologue",
+    "scanner",
+    "irm",
+    "radio",
+    "échographie"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Imagerie & Radiologie"
+   }
+  },
+  "Médecine_Ville_Generalistes": {
+   "synonymes": [
+    "médecin traitant",
+    "généraliste",
+    "consultation médecin",
+    "docteur"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Médecine de Ville - Généralistes"
+   }
+  },
+  "Médecine_Ville_Specialistes": {
+   "synonymes": [
+    "spécialiste",
+    "consultation spécialiste",
+    "dermatologue",
+    "cardiologue",
+    "ophtalmo"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Médecine de Ville - Spécialistes"
+   }
+  },
+  "Paramédical": {
+   "synonymes": [
+    "paramédical",
+    "kiné",
+    "infirmier",
+    "infirmière",
+    "soins infirmiers",
+    "pédicure",
+    "podologue"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Soins Paramédicaux"
+   }
+  },
+  "Biologie": {
+   "synonymes": [
+    "biologie",
+    "laboratoire",
+    "analyse de sang",
+    "prises de sang",
+    "analyses biologiques"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Biologie & Laboratoires"
+   }
+  },
+  "Urgences_SAMU": {
+   "synonymes": [
+    "urgences",
+    "samu",
+    "garde",
+    "astreinte"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Urgences & SAMU"
+   }
+  },
+  "Maternite_Perinatalite": {
+   "synonymes": [
+    "maternité",
+    "accouchement",
+    "sage-femme",
+    "grossesse",
+    "périnatalité",
+    "ivg"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Maternité & Périnatalité"
+   }
+  },
+  "Sante_Mentale": {
+   "synonymes": [
+    "santé mentale",
+    "psychiatrie",
+    "psychologie",
+    "psy",
+    "psychologue",
+    "psychiatre"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Santé Mentale & Psychiatrie"
+   }
+  },
+  "Dispositifs_Medicaux": {
+   "synonymes": [
+    "dispositifs médicaux",
+    "lpp",
+    "matériel médical",
+    "fauteuil roulant",
+    "assistance respiratoire"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Dispositifs Médicaux (LPP)"
+   }
+  },
+  "Prevention": {
+   "synonymes": [
+    "prévention",
+    "vaccination",
+    "vaccin",
+    "dépistage",
+    "test",
+    "santé publique"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Prévention & Santé Publique"
+   }
+  },
+  "Telemedecine": {
+   "synonymes": [
+    "télémédecine",
+    "téléconsultation",
+    "visio",
+    "télésoin",
+    "téléexpertise"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Télémédecine & Télésoins"
+   }
+  },
+  "Transports_Sanitaires": {
+   "synonymes": [
+    "transport sanitaire",
+    "ambulance",
+    "vsl",
+    "taxi conventionné"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Transports Sanitaires"
+   }
+  },
+  "Gestion_Indemnites": {
+   "synonymes": [
+    "indemnités",
+    "prévoyance",
+    "forfaits administratifs",
+    "aides sociales",
+    "gestion financière"
+   ],
+   "filtre": {
+    "colonne": "macro_categorie",
+    "valeur": "Indemnités & Prévoyance"
+   }
+  }
+ },
+ "themes_specifiques": {
+  "_note": "Sujets transverses requêtables, issus des demandes utilisateurs. Chacun indique les variables et modalités à utiliser.",
+  "c2s": {
+   "label": "Complémentaire Santé Solidaire (C2S)",
+   "definition": "Dispositif d'aide à la complémentaire pour les foyers modestes (ex-CMU-C / ACS).",
+   "identification": {
+    "PRS_REM_TYP": {
+     "5": "Ticket modérateur C2S",
+     "6": "Forfait C2S"
+    },
+    "BEN_CMU_TOP": {
+     "1": "Bénéficiaire de la C2S (depuis avril 2021)"
+    },
+    "CPT_ENV_TYP": {
+     "7": "Enveloppe C2S/AME/ACS"
+    }
+   },
+   "comment_requeter": "Filtrer PRS_REM_TYP ∈ {5,6} sur les indicateurs BRUTS (les FLT_* ne portent pas le C2S). Alternative : BEN_CMU_TOP=1 pour cibler les bénéficiaires.",
+   "attention": "Les montants C2S ne sont PAS dans les colonnes FLT_* de la table V1. Nécessite les montants bruts (PRS_*) et un élargissement du filtre en amont.",
+   "synonymes": [
+    "C2S",
+    "complémentaire santé solidaire",
+    "CMU",
+    "CMU-C",
+    "ACS",
+    "complémentaire solidaire"
+   ]
+  },
+  "alsace_moselle": {
+   "label": "Régime local Alsace-Moselle",
+   "definition": "Régime local complémentaire obligatoire des départements du Haut-Rhin, Bas-Rhin et Moselle, offrant une prise en charge supérieure.",
+   "identification": {
+    "PRS_REM_TYP": {
+     "4": "Supplément Alsace-Moselle",
+     "3": "Supplément hors Alsace-Moselle"
+    },
+    "MTM_NAT": {
+     "2": "Régime local Alsace-Moselle",
+     "3": "Régime local frontalier"
+    },
+    "CPT_ENV_TYP": {
+     "8": "Enveloppe Alsace-Moselle"
+    }
+   },
+   "comment_requeter": "Filtrer PRS_REM_TYP=4 (le supplément versé au titre du régime local) ou MTM_NAT=2 (bénéficiaires du régime local) ou CPT_ENV_TYP=8. Utiliser les indicateurs bruts.",
+   "correction": "Contrairement à une idée reçue, l'Alsace-Moselle EST identifiable (via ces modalités), même si elle ne l'est pas par la simple région de résidence.",
+   "synonymes": [
+    "Alsace-Moselle",
+    "régime local",
+    "Alsace Moselle",
+    "Haut-Rhin Bas-Rhin Moselle",
+    "régime local Alsace"
+   ]
+  },
+  "vaccins": {
+   "label": "Vaccination",
+   "definition": "Actes et rémunérations de vaccination, identifiables par la nature de prestation (PRS_NAT).",
+   "identification": {
+    "PRS_NAT": {
+     "1925": "REMUNERATION VACCINATION GRIPPE A PAR MEDECIN RETRAITE ET SALARIES HORS OBLIGATIONS",
+     "1926": "ACTE DE VACCINATION GRIPPE A/H1N1",
+     "1928": "REMUNERATION VACCINATION COVID 19",
+     "1929": "ACTE DE VACCINATION COVID 19",
+     "1930": "ACTE D INJECTION DU VACCIN COVID19",
+     "1959": "ADMINISTRATION  VACCIN",
+     "1962": "VACATION MEDECIN VACCINATION COVID 19",
+     "1982": "VACCINATION HPV 1ERE DOSE",
+     "1983": "VACCINATION HPV 2EME DOSE",
+     "3119": "REMUNERATION VACCINATION GRIPPE A PAR INFIRMIER RETRAITE OU SALARIE HORS OBLIGATIONS",
+     "3331": "VACCIN ANTI-GRIPPE",
+     "3332": "VACCIN ROR",
+     "3334": "Vaccin anti grippe Hémisphère Sud VAXIGRIP HS",
+     "3335": "Vaccin anti grippe Hémisphère Sud FLUARIX HS",
+     "3360": "VACCINATION GRIPPE PHARMACIEN",
+     "3375": "REMUNERATION PHARMACIENS POUR VACCINS H1N1",
+     "3379": "Honoraire de dispensation spécifique vaccins anti grippaux Hémisphère Sud",
+     "3399": "REMUNERATION PHARMACIENS POUR VACCINS H1N1 - REGULARISATION COMPTABLE ET SAISIE MANUELLE",
+     "3415": "RAPPEL VACCIN ADULTE PHARMACIEN",
+     "9211": "VACCIN (MILITAIRES) / VACCIN GRIPPE (CRPCEN)",
+     "9430": "TM DE L'ACTE DE VACCINATION GRIPPE A/H1N1"
+    }
+   },
+   "comment_requeter": "Filtrer PRS_NAT sur les codes vaccins. On peut cibler un type : grippe (3331, 3334, 3335, 3360, 3415…), COVID (1928, 1929, 1930, 1962…), HPV (1982, 1983), ROR (3332).",
+   "synonymes": [
+    "vaccin",
+    "vaccination",
+    "grippe",
+    "COVID",
+    "HPV",
+    "ROR",
+    "dose",
+    "rappel vaccinal",
+    "injection vaccin"
+   ]
+  },
+  "ald_exoneration": {
+   "label": "ALD et exonération du ticket modérateur",
+   "definition": "Affections de longue durée et autres motifs d'exonération (grossesse, prévention…), via le motif d'exonération.",
+   "identification": {
+    "EXO_MTF": {
+     "41": "BENEFICIAIRE ATTEINT D UNE MALADIE LISTE - AFFECTION SANS RAPPORT",
+     "42": "BENEFICIAIRE ATTEINT D UNE MALADIE LISTE - AFFECTION EN  RAPPORT",
+     "43": "PATHOLOGIE HORS LISTE - AFFECTION SANS RAPPORT",
+     "44": "PATHOLOGIE HORS LISTE - AFFECTION EN RAPPORT",
+     "45": "POLYPATHOLOGIE HORS LISTE - AFFECTION SANS RAPPORT",
+     "46": "POLYPATHOLOGIE HORS LISTE - AFFECTION EN RAPPORT",
+     "55": "6EME MOIS DE GROSSESSE",
+     "81": "PREVENTION"
+    }
+   },
+   "comment_requeter": "Filtrer EXO_MTF : 41-46 = ALD (avec/sans rapport à la pathologie), 55 = 6e mois de grossesse, 81 = prévention.",
+   "synonymes": [
+    "ALD",
+    "affection longue durée",
+    "exonération",
+    "ticket modérateur exonéré",
+    "100% ALD",
+    "maladie chronique"
+   ]
+  },
+  "prevention": {
+   "label": "Prévention",
+   "definition": "Actes de prévention, identifiables par l'enveloppe ou la nature d'assurance.",
+   "identification": {
+    "CPT_ENV_TYP": {
+     "4": "Prévention"
+    },
+    "ASU_NAT": {
+     "90": "Prévention maladie"
+    },
+    "EXO_MTF": {
+     "81": "Prévention"
+    }
+   },
+   "comment_requeter": "Filtrer CPT_ENV_TYP=4 ou ASU_NAT=90 pour cibler la prévention.",
+   "synonymes": [
+    "prévention",
+    "dépistage",
+    "acte préventif"
+   ]
+  },
+  "parcours_soins": {
+   "label": "Parcours de soins",
+   "definition": "Respect ou non du parcours de soins coordonnés (médecin traitant).",
+   "identification": {
+    "PRS_PDS_QCP": "Voir modalites_cles.PRS_PDS_QCP (26 modalités)"
+   },
+   "comment_requeter": "Utiliser PRS_PDS_QCP pour distinguer médecin traitant déclaré, accès direct, urgence, hors coordination.",
+   "synonymes": [
+    "parcours de soins",
+    "médecin traitant",
+    "accès direct",
+    "coordination des soins"
+   ]
+  }
+ },
+ "glossaire": {
+  "AMO": {
+   "definition": "Assurance Maladie Obligatoire — la part remboursée par la Sécurité sociale (régime de base). C'est le périmètre d'Open DAMIR.",
+   "synonymes": [
+    "AMO",
+    "assurance maladie obligatoire",
+    "régime obligatoire",
+    "Sécu",
+    "RO"
+   ]
+  },
+  "AMC": {
+   "definition": "Assurance Maladie Complémentaire — la part prise en charge par les mutuelles/complémentaires. HORS périmètre d'Open DAMIR.",
+   "synonymes": [
+    "AMC",
+    "complémentaire",
+    "mutuelle",
+    "OCAM"
+   ]
+  },
+  "C2S": "Complémentaire Santé Solidaire. Remplace l'ancienne CMU-C et l'ACS. Elle couvre le ticket modérateur pour les personnes aux revenus modestes.",
+  "Ticket Modérateur": {
+   "definition": "Part de la dépense qui reste à la charge de l'assuré après remboursement de l'AMO (avant complémentaire).",
+   "synonymes": [
+    "ticket modérateur",
+    "TM",
+    "reste après Sécu"
+   ]
+  },
+  "100% Santé": "Dispositif gouvernemental garantissant un reste à charge nul sur une sélection d'équipements en optique, audiologie et dentaire.",
+  "Base de remboursement": "Tarif de référence (BRSS) fixé par l'Assurance Maladie sur lequel s'applique le taux de remboursement.",
+  "Reste à charge": {
+   "definition": "Ce qui reste à payer par l'assuré. Avant complémentaire = dépense engagée − montant remboursé RO.",
+   "synonymes": [
+    "reste à charge",
+    "RAC",
+    "ce qui reste à payer"
+   ]
+  },
+  "Dépassement": {
+   "definition": "Montant facturé au-delà du tarif de convention (honoraires libres).",
+   "synonymes": [
+    "dépassement",
+    "dépassement d'honoraires"
+   ]
+  }
+ },
+ "paniers_sante": {
+  "colonne": "flag_panier_santé_cor",
+  "valeurs": [
+   "100% Santé",
+   "Panier maîtrisé",
+   "Panier libre",
+   "Hors Dispositif"
+  ],
+  "definition": "Classification des prestations dans le cadre de la réforme 100% Santé (optique, audio, dentaire). 100% Santé = reste à charge zéro ; panier maîtrisé = reste à charge encadré ; panier libre = tarif libre.",
+  "note_correction": "Flag recalculé par Asma. Optique : monture/verre classe A → 100% Santé, classe B → Panier libre, CMU/C2S → Panier maîtrisé. Dentaire : Prothèse RAC 0 → 100% Santé, RAC Modéré → Panier maîtrisé, Tarif Libre → Panier libre. Audio : RAC zéro → 100% Santé."
+ },
+ "ordres_de_grandeur": {
+  "_note": "Plages de plausibilité pour les garde-fous anti-hallucination. Un résultat hors de ces plages doit être signalé comme suspect.",
+  "depense_optique_annuelle_totale": "5-7 Md€/an (tous financeurs)",
+  "remboursement_optique_amo_annuel": "~0,15 Md€/an",
+  "concordance_iso_damir_openmedic": "99,3% sur la pharmacie de ville (2015-2024)",
+  "taux_couverture_global": "~75% (moyenne tous postes, tirée par l'hôpital)",
+  "dentaire_rembourse_periode": "~29 Md€ sur 2022-2025, taux couverture ~28%",
+  "optique_taux_couverture": "~2% (AMO faible, complémentaires financent l'essentiel)",
+  "audio_taux_couverture": "~17% (19% post-réforme 2021)",
+  "dentaire_couverture_par_type": "Soins conservateurs ~45% > Orthodontie ~28% > Prothèse RAC0 ~22% > Tarif Libre ~18% > RAC Modéré ~18%",
+  "_a_valider": "Bornes pharmacie/hospitalisation/global ajoutées à titre indicatif sur le périmètre MCP 2022-2025. À CALER sur les valeurs exactes validées dans Power BI avant la démo.",
+  "remboursement_am_annuel_total": "~125-130 Md€/an (tous postes AMO, ex. 2023 ≈ 128 Md€)",
+  "pharmacie_rembourse_annuel": "~25-27 Md€/an (AMO, ville + hôpital) — À VALIDER",
+  "hospitalisation_rembourse_annuel": "~17-19 Md€/an (AMO) — À VALIDER",
+  "nombre_actes_ordre": "plusieurs milliards d'unités/an (quantités agrégées, pas actes unitaires)"
+ },
+ "hors_perimetre": {
+  "_note": "Le système doit refuser proprement (sans halluciner) les demandes hors périmètre.",
+  "exemples": [
+   "données individuelles / nominatives",
+   "SNDS",
+   "chirurgie esthétique non remboursée",
+   "données postérieures à 2025 ou antérieures à 2022",
+   "prévisions / projections",
+   "transport sanitaire",
+   "cure thermale",
+   "médecine douce",
+   "ostéopathie",
+   "part complémentaire / mutuelle (AMC)",
+   "ce que rembourse la mutuelle",
+   "questions médicales (posologie, effets secondaires, indication)",
+   "conseil médical / quel médicament pour quelle maladie",
+   "données individuelles ou nominatives",
+   "prévisions / projections futures"
+  ],
+  "reponse_type": "Cette information n'est pas disponible dans le périmètre Open DAMIR 2022-2025 chargé pour cette démonstration.",
+  "reponses_specialisees": {
+   "amc_mutuelle": "Open DAMIR ne contient que la part Assurance Maladie Obligatoire (AMO). La part complémentaire (mutuelle / AMC) n'est pas dans ce périmètre. On peut en revanche estimer le reste à charge avant complémentaire (dépense engagée moins remboursement AMO).",
+   "medical": "Cette démonstration interroge des données de remboursement, pas des informations médicales. Je ne peux pas répondre à une question clinique ou de posologie.",
+   "hors_temporel": "Le périmètre chargé pour cette démonstration couvre Open DAMIR 2022-2025. Cette période n'est pas disponible.",
+   "individuel": "Open DAMIR est une base agrégée et anonyme. Aucune donnée individuelle ou nominative n'est accessible."
+  },
+  "mots_exclus": [
+   "esthetique",
+   "esthétique",
+   "esthetic",
+   "cosmetic",
+   "cosmétique",
+   "confort"
+  ],
+  "mots_amc": [
+   "mutuelle",
+   "complementaire",
+   "complémentaire",
+   "amc"
+  ]
+ },
+ "capacites_reponse": {
+  "_note": "Prépare l'évolution de l'assistant vers des réponses structurées (tableaux) et visuelles, au-delà de la valeur unique.",
+  "types_actuels": [
+   "valeur_unique",
+   "phrase_contextualisee"
+  ],
+  "types_cibles": [
+   "tableau (liste de lignes)",
+   "serie_temporelle (évolution)",
+   "repartition (ventilation par dimension)",
+   "visuel (graphique généré)"
+  ],
+  "principe": "Chaque outil-famille déclare son 'type_reponse'. Un outil peut renvoyer une structure (lignes/colonnes) que l'interface affiche en tableau, puis en graphique. Le modèle ne génère jamais le tableau : il choisit l'outil et les paramètres, le code produit la structure.",
+  "roadmap": [
+   "v1 : valeur + phrase.",
+   "v1.1 : tableau (l'outil renvoie des lignes structurées).",
+   "v2 : série temporelle et répartition affichées en graphique.",
+   "v2+ : visuel généré à la demande (exploratoire)."
+  ]
+ },
+ "classification_postes": {
+  "_note": "Classification métier en macro-catégories et sous-catégories (table dim_prestations, colonnes macro_categorie et sous_categorie_cor). C'est le travail de reclassement sur les 1569 prestations.",
+  "cle": "prs_nat (jointure damia_fact_hist → dim_prestations)",
+  "macro_categories": {
+   "Médecine de Ville - Généralistes": [
+    "Consultations & Visites (Généralistes)",
+    "Forfaits & Majorations (Généralistes)",
+    "Consultations Pédiatriques"
+   ],
+   "Médecine de Ville - Spécialistes": [
+    "Consultations & Visites (Spécialistes)",
+    "Forfaits & Majorations (Spécialistes)"
+   ],
+   "Soins Dentaires & Orthodontie": [
+    "Soins Dentaires Conservateurs & Divers",
+    "Prothèse Dentaire (RAC 0)",
+    "Prothèse Dentaire (RAC Modéré)",
+    "Prothèse Dentaire (Tarif Libre/Autre)",
+    "Orthodontie"
+   ],
+   "Optique & Audioprothèse": [
+    "Optique Médicale",
+    "Audioprothèse",
+    "Appareillages Sensoriels Divers"
+   ],
+   "Pharmacie": [
+    "Délivrance de Médicaments",
+    "Honoraires de Dispensation",
+    "Préparations Magistrales"
+   ],
+   "Hospitalisation & Chirurgie": [
+    "Chirurgie & Autres Actes Hospitaliers",
+    "Frais de Séjour & Hébergement",
+    "Dialyse & Hémodialyse",
+    "Réanimation Hospitalière"
+   ],
+   "Dispositifs Médicaux (LPP)": [
+    "Matériel Médical Divers",
+    "Assistance Respiratoire"
+   ],
+   "Soins Paramédicaux": [
+    "Kinésithérapie",
+    "Soins Infirmiers",
+    "Autres Soins Paramédicaux",
+    "Pédicurie-Podologie"
+   ],
+   "Imagerie & Radiologie": [
+    "Radiographie & Scanner",
+    "Échographie",
+    "IRM & Mammographie",
+    "Autres Actes d'Imagerie"
+   ],
+   "Biologie & Laboratoires": [
+    "Analyses Biologiques & Forfaits",
+    "Prélèvements Biologiques"
+   ],
+   "Urgences & SAMU": [
+    "Forfaits & Actes d'Urgence",
+    "Gardes & Astreintes d'Urgence",
+    "Régulation & Interventions SAMU"
+   ],
+   "Maternité & Périnatalité": [
+    "Suivi de Grossesse & Accouchement",
+    "Actes de Sages-Femmes",
+    "Autres Soins Périnataux",
+    "Interruption Volontaire de Grossesse (IVG)"
+   ],
+   "Santé Mentale & Psychiatrie": [
+    "Psychiatrie",
+    "Psychologie",
+    "Autres Actes de Santé Mentale"
+   ],
+   "Prévention & Santé Publique": [
+    "Dépistages & Tests Rapides (Réalisation)",
+    "Vaccination",
+    "Autres Actes de Prévention"
+   ],
+   "Télémédecine & Télésoins": [
+    "Téléconsultations",
+    "Téléexpertise",
+    "Télésurveillance",
+    "Autres Actes de Télémédecine"
+   ],
+   "Transports Sanitaires": [
+    "Autres Transports"
+   ],
+   "Gestion Financière & Divers": [
+    "Codes Administratifs & Forfaits",
+    "Rémunérations Forfaitaires & Contrats",
+    "Participation Assuré & Pénalités"
+   ],
+   "Indemnités & Prévoyance": [
+    "Autres Prestations Sociales",
+    "Aides Sociales & CMU/C2S"
+   ]
+  }
+ },
+ "_roadmap_dictionnaire": {
+  "note": "Ce dictionnaire est vivant. À chaque évolution du dashboard ou du périmètre, le mettre à jour.",
+  "a_faire": [
+   "À la migration temporelle : mettre à jour perimetre.assistant_v1.annees.",
+   "Quand le dashboard intègre de nouvelles variables (C2S, ambu/séjour, libéral/centre) : les ajouter en dimensions + thèmes_specifiques et les exposer côté outils.",
+   "Ajouter de nouveaux thèmes selon les demandes utilisateurs (boucle de feedback).",
+   "Maintenir la cohérence des synonymes : toute nouvelle formulation rencontrée en test → l'ajouter."
+  ]
+ },
+ "granularite_prestations": {
+  "_note": "La donnée est requêtable à 3 niveaux, du plus large au plus fin, SANS colonne supplémentaire. Pour une distinction fine non portée par la classification (ex. verres vs montures), descendre au niveau prs_nat en ciblant les codes (voir decoupages_fins).",
+  "niveaux": [
+   {
+    "niveau": 1,
+    "nom": "macro_categorie",
+    "colonne": "macro_categorie",
+    "exemple": "Optique & Audioprothèse",
+    "usage": "Question sur un grand poste (ex. 'dépenses d'optique')."
+   },
+   {
+    "niveau": 2,
+    "nom": "sous_categorie",
+    "colonne": "sous_categorie_cor",
+    "exemple": "Optique Médicale",
+    "usage": "Question sur une sous-catégorie (ex. 'prothèses RAC 0', 'soins conservateurs')."
+   },
+   {
+    "niveau": 3,
+    "nom": "prestation",
+    "colonne": "prs_nat",
+    "exemple": "3500 (verre), 3505 (monture)",
+    "usage": "Question sur une prestation fine non isolée par la classification (verres, montures, lentilles…)."
+   }
+  ],
+  "regle_routage": "Choisir le niveau le plus fin nécessaire : macro pour un poste global, sous_categorie si la distinction existe déjà dans la classification, prs_nat pour une finesse non classée (voir decoupages_fins)."
+ },
+ "catalogue_sous_categories": {
+  "_note": "Valeurs possibles de sous_categorie_cor (classification métier du dashboard). Sert à reconnaître et filtrer au niveau 2. La correspondance prs_nat → sous_categorie vit dans dim_prestations (non dupliquée ici).",
+  "soins_de_ville": [
+   "Consultations & Visites (Généralistes)",
+   "Consultations & Visites (Spécialistes)",
+   "Consultations Pédiatriques",
+   "Forfaits & Majorations (Généralistes)",
+   "Forfaits & Majorations (Spécialistes)",
+   "Téléconsultations",
+   "Téléexpertise",
+   "Télésurveillance",
+   "Autres Actes de Télémédecine",
+   "Rémunérations Forfaitaires & Contrats"
+  ],
+  "urgences_samu": [
+   "Forfaits & Actes d'Urgence",
+   "Gardes & Astreintes d'Urgence",
+   "Régulation & Interventions SAMU"
+  ],
+  "hopital": [
+   "Chirurgie & Autres Actes Hospitaliers",
+   "Frais de Séjour & Hébergement",
+   "Réanimation Hospitalière",
+   "Dialyse & Hémodialyse"
+  ],
+  "imagerie": [
+   "Radiographie & Scanner",
+   "Échographie",
+   "IRM & Mammographie",
+   "Autres Actes d'Imagerie"
+  ],
+  "biologie": [
+   "Analyses Biologiques & Forfaits",
+   "Prélèvements Biologiques"
+  ],
+  "dentaire": [
+   "Soins Conservateurs",
+   "Orthodontie",
+   "Prothèse RAC 0",
+   "Prothèse RAC Modéré",
+   "Prothèse Tarif Libre"
+  ],
+  "optique_audio": [
+   "Optique Médicale",
+   "Audioprothèse",
+   "Appareillages Sensoriels Divers"
+  ],
+  "pharmacie_lpp": [
+   "Délivrance de Médicaments",
+   "Honoraires de Dispensation",
+   "Préparations Magistrales",
+   "Matériel Médical Divers",
+   "Assistance Respiratoire"
+  ],
+  "paramedical": [
+   "Soins Infirmiers",
+   "Kinésithérapie",
+   "Pédicurie-Podologie",
+   "Psychologie",
+   "Autres Soins Paramédicaux",
+   "Soins Paramédicaux",
+   "Actes de Sages-Femmes"
+  ],
+  "perinatalite": [
+   "Suivi de Grossesse & Accouchement",
+   "Autres Soins Périnataux",
+   "Interruption Volontaire de Grossesse (IVG)"
+  ],
+  "sante_mentale": [
+   "Psychiatrie",
+   "Autres Actes de Santé Mentale"
+  ],
+  "prevention_depistage": [
+   "Dépistages & Tests Rapides (Réalisation)",
+   "Autres Actes de Prévention",
+   "Vaccination"
+  ],
+  "transports": [
+   "Autres Transports"
+  ],
+  "social_administratif": [
+   "Aides Sociales & CMU/C2S",
+   "Autres Prestations Sociales",
+   "Participation Assuré & Pénalités",
+   "Codes Administratifs & Forfaits"
+  ]
+ },
+ "decoupages_fins": {
+  "_note": "Distinctions fines NON portées par la classification (sous_categorie_cor), disponibles uniquement au niveau prs_nat. L'assistant filtre prs_nat IN (liste). Aligné sur le dashboard, aucune colonne ajoutée à la table.",
+  "optique_verres_montures": {
+   "poste_parent": "Optique",
+   "sous_categorie": "Optique Médicale",
+   "colonne": "prs_nat",
+   "groupes": {
+    "Verres": {
+     "codes": [
+      "3500",
+      "3501",
+      "3502",
+      "3503",
+      "3504",
+      "3507",
+      "3508",
+      "3509",
+      "3510",
+      "3519",
+      "3520",
+      "3524",
+      "3525",
+      "3526",
+      "3527",
+      "3528",
+      "3529",
+      "3530",
+      "3533",
+      "3536",
+      "3537",
+      "3538",
+      "3539"
+     ],
+     "synonymes": [
+      "verre",
+      "verres",
+      "verre correcteur",
+      "verres correcteurs"
+     ]
+    },
+    "Montures": {
+     "codes": [
+      "3505",
+      "3506",
+      "3523",
+      "3532"
+     ],
+     "synonymes": [
+      "monture",
+      "montures"
+     ]
+    },
+    "Lentilles": {
+     "codes": [
+      "3535"
+     ],
+     "synonymes": [
+      "lentille",
+      "lentilles",
+      "lentilles de contact"
+     ]
+    }
+   },
+   "comment_requeter": "Pour 'remboursement des verres' : filtrer prs_nat IN (liste Verres). Idem montures/lentilles. Somme des groupes ⊆ total Optique Médicale (des codes optique non-verre/monture existent : bilans, réparations…).",
+   "exemple_question": "« Quels sont les remboursements des verres et des montures ? » → deux requêtes prs_nat, une par groupe."
+  },
+  "_note_extension": "Ajouter ici tout futur découpage fin repéré au niveau prs_nat (ex. types de prothèses par matériau si un jour requis), sur le même modèle.",
+  "dentaire_types": {
+   "poste_parent": "Dentaire",
+   "colonne": "sous_categorie_cor",
+   "groupes": {
+    "Prothèses dentaires": {
+     "sous_categories": [
+      "Prothèse RAC 0",
+      "Prothèse RAC Modéré",
+      "Prothèse Tarif Libre"
+     ],
+     "synonymes": [
+      "prothese dentaire",
+      "protheses dentaires",
+      "prothese",
+      "protheses",
+      "protheses_dentaires",
+      "prothese_dentaire",
+      "couronne",
+      "bridge"
+     ]
+    },
+    "Soins conservateurs": {
+     "sous_categories": [
+      "Soins Conservateurs"
+     ],
+     "synonymes": [
+      "soin conservateur",
+      "soins conservateurs",
+      "carie",
+      "detartrage"
+     ]
+    },
+    "Orthodontie": {
+     "sous_categories": [
+      "Orthodontie"
+     ],
+     "synonymes": [
+      "orthodontie",
+      "ortho",
+      "appareil dentaire",
+      "bagues"
+     ]
+    }
+   },
+   "comment_requeter": "Filtrer sous_categorie_cor IN (liste). Les prothèses regroupent les 3 paniers (RAC 0, RAC Modéré, Tarif Libre)."
+  }
+ }
+}

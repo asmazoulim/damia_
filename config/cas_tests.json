@@ -1,0 +1,229 @@
+{
+  "_meta": {
+    "description": "Cas de test du banc de routage + calcul + contenu DAMIA. Modifier les valeurs_attendues si la base change.",
+    "perimetre": "Open DAMIR 2022-2025 — part Assurance Maladie Obligatoire (AMO), tous régimes. Sources : Open DAMIR, Open Medic, Open LPP. La part complémentaire (AMC) est hors périmètre.",
+    "unite_valeurs": "euros (montants) ou nombre (actes)",
+    "tolerance_pct_defaut": 1.0,
+    "_champs": "outils_acceptes, params_attendus, valeur_attendue, tolerance_pct, contient_attendu (sous-chaines devant apparaitre dans la reponse, insensible aux accents), refus_attendu. Outil 'reponse_meta' = reponse meta (perimetre/source/annees/capacites)."
+  },
+  "cas": [
+    {
+      "question": "Quel est le montant remboursé par l'Assurance Maladie en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 128170000000,
+      "categorie": "Base"
+    },
+    {
+      "question": "Quel est le remboursement de l'optique en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 103830000,
+      "categorie": "Base"
+    },
+    {
+      "question": "Quel est le remboursement des verres en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 66840000,
+      "categorie": "Granularité optique"
+    },
+    {
+      "question": "Quel est le remboursement des montures en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 11670000,
+      "categorie": "Granularité optique"
+    },
+    {
+      "question": "Remboursement des prothèses dentaires en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 1180000000,
+      "categorie": "Granularité dentaire"
+    },
+    {
+      "question": "Remboursement des soins conservateurs en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 1340000000,
+      "categorie": "Granularité dentaire"
+    },
+    {
+      "question": "Remboursement de l'orthodontie en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 534910000,
+      "categorie": "Granularité dentaire"
+    },
+    {
+      "question": "Remboursement de l'optique pour les hommes en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 40610000,
+      "categorie": "Dimensions"
+    },
+    {
+      "question": "Remboursement de l'optique en Occitanie en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 11240000,
+      "categorie": "Dimensions"
+    },
+    {
+      "question": "Quelle est l'évolution du remboursement des verres ?",
+      "outils_acceptes": [
+        "evolution_serie"
+      ],
+      "params_attendus": {
+        "decoupage": "verres"
+      },
+      "categorie": "Séries & répartitions"
+    },
+    {
+      "question": "Répartition des remboursements des verres par région ?",
+      "outils_acceptes": [
+        "repartition"
+      ],
+      "params_attendus": {
+        "decoupage": "verres"
+      },
+      "categorie": "Séries & répartitions"
+    },
+    {
+      "question": "Quels sont les 5 postes les plus remboursés en 2023 ?",
+      "outils_acceptes": [
+        "top_postes"
+      ],
+      "categorie": "Séries & répartitions"
+    },
+    {
+      "question": "Compare les dépenses dentaires entre 2022 et 2024",
+      "outils_acceptes": [
+        "compare_periods"
+      ],
+      "params_attendus": {
+        "annee1": 2022,
+        "annee2": 2024
+      },
+      "categorie": "Comparaison"
+    },
+    {
+      "question": "Combien remboursent les mutuelles ?",
+      "refus_attendu": true,
+      "categorie": "Garde-fou"
+    },
+    {
+      "question": "Quel est le remboursement de l'optique en 2019 ?",
+      "refus_attendu": true,
+      "categorie": "Garde-fou"
+    },
+    {
+      "question": "Quel est le remboursement de l'optique en Atlantide ?",
+      "refus_attendu": true,
+      "categorie": "Garde-fou"
+    },
+    {
+      "question": "Combien a coûté la chirurgie esthétique ?",
+      "refus_attendu": true,
+      "categorie": "Garde-fou"
+    },
+    {
+      "question": "Que veut dire C2S ?",
+      "outils_acceptes": [
+        "get_dictionnaire"
+      ],
+      "contient_attendu": [
+        "solidaire"
+      ],
+      "categorie": "Glossaire"
+    },
+    {
+      "question": "Que veut dire AMO ?",
+      "outils_acceptes": [
+        "get_dictionnaire"
+      ],
+      "contient_attendu": [
+        "obligatoire"
+      ],
+      "categorie": "Glossaire"
+    },
+    {
+      "question": "C'est quoi l'AMC ?",
+      "outils_acceptes": [
+        "get_dictionnaire"
+      ],
+      "contient_attendu": [
+        "mutuelles"
+      ],
+      "categorie": "Glossaire"
+    },
+    {
+      "question": "Explique-moi le ticket modérateur",
+      "outils_acceptes": [
+        "get_dictionnaire"
+      ],
+      "contient_attendu": [
+        "charge"
+      ],
+      "categorie": "Glossaire"
+    },
+    {
+      "question": "La sécu rembourse combien en 2023 ?",
+      "outils_acceptes": [
+        "query_depenses"
+      ],
+      "valeur_attendue": 128170000000,
+      "categorie": "Robustesse"
+    },
+    {
+      "question": "Quelles années sont couvertes par l'assistant ?",
+      "outils_acceptes": [
+        "reponse_meta"
+      ],
+      "contient_attendu": [
+        "2022-2025"
+      ],
+      "categorie": "Méta"
+    },
+    {
+      "question": "D'où viennent les données ?",
+      "outils_acceptes": [
+        "reponse_meta"
+      ],
+      "contient_attendu": [
+        "Open DAMIR"
+      ],
+      "categorie": "Méta"
+    },
+    {
+      "question": "Que sais-tu faire ?",
+      "outils_acceptes": [
+        "reponse_meta"
+      ],
+      "contient_attendu": [
+        "obligatoire"
+      ],
+      "categorie": "Méta"
+    },
+    {
+      "question": "Est-ce que tu gères les mutuelles ?",
+      "outils_acceptes": [
+        "reponse_meta"
+      ],
+      "contient_attendu": [
+        "obligatoire"
+      ],
+      "categorie": "Méta"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# === Démo (Ollama local) — indispensable ===
+duckdb==1.5.0
+ollama==0.6.2
+streamlit==1.58.0
+
+# === Serveur MCP (src/mcp_server.py) ===
+mcp
+
+# === Optionnel — backend API distante (backends.py -> APIBackend) ===
+# anthropic
+
+# === Optionnel — backend Transformers local / GPU (backends.py -> TransformersBackend) ===
+# torch
+# transformers
+# bitsandbytes
+
+# NB : pandas retiré (jamais importé). 'requests' n'est plus nécessaire
+#      (OllamaBackend utilise désormais la librairie `ollama`).
+# Pour figer mcp/anthropic à une version : pip freeze | findstr /I "mcp anthropic"

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DAMIA — Assistant Open DAMIR</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --violet:#534AB7; --violet-fonce:#26215C; --violet-clair:#EEEDFE;
+    --bg:#F6F6FA; --card:#ffffff; --border:#E7E5F0; --texte:#1f2330; --muted:#6b6b78;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--texte);
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    display:flex;flex-direction:column;height:100vh}
+
+  /* En-tête plein largeur */
+  header{background:var(--card);border-bottom:0.5px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between;
+    padding:12px 22px;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;background:var(--violet-clair);
+    display:flex;align-items:center;justify-content:center;color:var(--violet-fonce);
+    font-weight:600;font-size:15px}
+  .brand .t{font-size:15px;font-weight:600;line-height:1.2}
+  .brand .s{font-size:12px;color:var(--muted)}
+  .modele{display:flex;align-items:center;gap:8px}
+  .modele .dot{width:8px;height:8px;border-radius:50%;background:#1D9E75}
+  select{font-size:13px;color:var(--violet-fonce);background:var(--violet-clair);
+    border:0.5px solid transparent;border-radius:20px;padding:7px 12px;cursor:pointer;
+    font-weight:500;outline:none;-webkit-appearance:none;appearance:none}
+
+  /* Zone de conversation centrée */
+  main{flex:1;overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:24px 16px 8px}
+  .col{width:100%;max-width:760px;display:flex;flex-direction:column;gap:16px}
+
+  /* Bulles */
+  .row{display:flex;gap:10px;align-items:flex-start}
+  .row.user{flex-direction:row-reverse}
+  .av{width:30px;height:30px;border-radius:8px;flex-shrink:0;display:flex;
+    align-items:center;justify-content:center;font-size:14px}
+  .av.ai{background:var(--violet-clair);color:var(--violet-fonce)}
+  .av.me{background:#E4E3EC;color:#555}
+  .bulle{max-width:80%;font-size:14.5px;line-height:1.55}
+  .user .bulle{background:var(--violet);color:#fff;padding:10px 14px;
+    border-radius:14px 14px 4px 14px}
+  .ai .bulle{background:var(--card);border:0.5px solid var(--border);padding:12px 15px;
+    border-radius:14px 14px 14px 4px}
+  .ai .bulle strong{color:var(--violet-fonce)}
+
+  /* Table de résultat */
+  table.res{width:100%;border-collapse:collapse;margin-top:10px;font-size:13.5px}
+  table.res td{padding:6px 4px;border-bottom:0.5px solid #ECEBF3}
+  table.res td.v{text-align:right;font-weight:600}
+  table.res td.l{color:var(--muted)}
+
+  /* Contrôles graphique */
+  .gc{margin-top:12px}
+  .seg{display:inline-flex;background:#F1F0F7;border-radius:10px;padding:3px;gap:2px}
+  .seg button{border:none;background:transparent;color:var(--muted);font-size:12.5px;
+    padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:500}
+  .seg button.on{background:#fff;color:var(--violet-fonce);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .chart-wrap{margin-top:12px;position:relative;height:280px}
+  .dl{display:flex;gap:8px;margin-top:10px}
+  .dl a{font-size:12px;color:var(--violet-fonce);background:var(--violet-clair);
+    padding:5px 11px;border-radius:8px;text-decoration:none}
+  details.tech{margin-top:8px;font-size:12px}
+  details.tech summary{color:var(--muted);cursor:pointer;list-style:none}
+  details.tech pre{background:#F6F6FA;border-radius:8px;padding:8px 10px;overflow:auto;font-size:11.5px}
+  .tool{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--violet-fonce);
+    background:var(--violet-clair);padding:2px 9px;border-radius:6px;margin-top:6px}
+  .meta{font-size:11px;color:#9a9aa5;margin-left:8px}
+
+  /* Écran d'accueil */
+  .hero{text-align:center;margin:26px 0 20px}
+  .hero h1{font-size:25px;font-weight:600;margin:0 0 6px}
+  .hero p{font-size:14.5px;color:var(--muted);margin:0}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+  .ccard{background:var(--card);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px}
+  .ccard b{font-size:14px}
+  .ccard span{display:block;font-size:12.5px;color:var(--muted);margin-top:3px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .chip{font-size:13px;padding:8px 14px;border-radius:20px;border:0.5px solid #D8D6E6;
+    background:var(--card);color:#4a4a57;cursor:pointer}
+  .chip:hover{border-color:var(--violet);color:var(--violet-fonce);background:var(--violet-clair)}
+
+  /* Barre de saisie */
+  footer{flex-shrink:0;display:flex;justify-content:center;padding:12px 16px 20px;background:transparent}
+  .inp{width:100%;max-width:760px;display:flex;align-items:center;gap:10px;background:var(--card);
+    border:0.5px solid #D8D6E6;border-radius:26px;padding:8px 8px 8px 18px}
+  .inp input{flex:1;border:none;outline:none;font-size:14.5px;background:transparent;color:var(--texte)}
+  .inp button{width:38px;height:38px;border:none;border-radius:50%;background:var(--violet);
+    color:#fff;font-size:18px;cursor:pointer;flex-shrink:0}
+  .inp button:disabled{opacity:.5;cursor:default}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--violet-fonce);
+    color:#fff;font-size:13px;padding:9px 16px;border-radius:20px;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">DA</div>
+    <div>
+      <div class="t">DAMIA</div>
+      <div class="s">Assistant Open DAMIR · dépenses Assurance Maladie obligatoire</div>
+    </div>
+  </div>
+  <div class="modele">
+    <span class="dot"></span>
+    <select id="sel-modele" title="Choisir le moteur d'IA"></select>
+  </div>
+</header>
+
+<main><div class="col" id="col"></div></main>
+
+<footer>
+  <div class="inp">
+    <input id="q" type="text" placeholder="Posez votre question sur les dépenses AMO…" autocomplete="off">
+    <button id="send" title="Envoyer">↑</button>
+  </div>
+</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+const col = document.getElementById('col');
+const input = document.getElementById('q');
+const sendBtn = document.getElementById('send');
+const sel = document.getElementById('sel-modele');
+const toastEl = document.getElementById('toast');
+const VIOLET = '#534AB7';
+const PALETTE = ['#534AB7','#7F77DD','#1D9E75','#D85A30','#D4537E','#378ADD','#EF9F27','#639922','#AFA9EC','#5DCAA5','#F0997B','#85B7EB'];
+
+const SUGGESTIONS = [
+  "Quel est le remboursement de l'optique en 2023 ?",
+  "Quels sont les 5 postes les plus remboursés en 2023 ?",
+  "Évolution du remboursement des verres",
+  "Que veut dire C2S ?"
+];
+const CAPACITES = [
+  ["Montants remboursés","Par poste, année, région, sexe ou âge."],
+  ["Répartitions & séries","Ventilation par région, évolution dans le temps."],
+  ["Comparaisons","Deux années, top des postes les plus remboursés."],
+  ["Glossaire métier","AMO, AMC, C2S, ticket modérateur…"]
+];
+
+let charts = {};   // id -> instance Chart
+
+function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show');
+  setTimeout(()=>toastEl.classList.remove('show'), 2200); }
+
+function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function formatValeur(v, unite){
+  v = Number(v) || 0;
+  if(unite === 'actes') return v.toLocaleString('fr-FR');
+  const f2 = {minimumFractionDigits:2, maximumFractionDigits:2};
+  if(Math.abs(v) >= 1e9) return (v/1e9).toLocaleString('fr-FR', f2) + ' Md€';
+  if(Math.abs(v) >= 1e6) return (v/1e6).toLocaleString('fr-FR', f2) + ' M€';
+  return v.toLocaleString('fr-FR') + ' €';
+}
+
+// Prépare les données (tri/limite) selon répartition ou série temporelle
+function preparer(table){
+  let lignes = (table.lignes || []).slice();
+  if(!table.est_temporel) lignes.sort((a,b)=> (b[1]||0) - (a[1]||0));
+  lignes = lignes.slice(0, 12);
+  return {
+    labels: lignes.map(r => String(r[0])),
+    valeurs: lignes.map(r => Number(r[1]) || 0),
+    unite: table.unite || '€',
+    titre: table.titre || ''
+  };
+}
+
+function dessiner(id, table, type){
+  const d = preparer(table);
+  const ctx = document.getElementById(id).getContext('2d');
+  if(charts[id]) charts[id].destroy();
+  const estCircul = (type === 'pie');
+  charts[id] = new Chart(ctx, {
+    type: type,
+    data: {
+      labels: d.labels,
+      datasets: [{
+        label: d.titre,
+        data: d.valeurs,
+        backgroundColor: estCircul ? d.labels.map((_,i)=>PALETTE[i % PALETTE.length])
+                                   : (type==='line' ? 'rgba(83,74,183,0.12)' : VIOLET),
+        borderColor: type==='line' ? VIOLET : '#fff',
+        borderWidth: type==='line' ? 2 : (estCircul ? 1 : 0),
+        fill: type==='line',
+        tension: 0.3,
+        pointBackgroundColor: VIOLET
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      indexAxis: (type==='bar' && !table.est_temporel) ? 'y' : 'x',
+      plugins:{
+        legend:{ display: estCircul, position:'right', labels:{font:{size:11}} },
+        tooltip:{ callbacks:{ label: c => ' ' + formatValeur(c.parsed.y ?? c.parsed.x ?? c.parsed, d.unite) } }
+      },
+      scales: estCircul ? {} : {
+        x:{ ticks:{font:{size:10}}, grid:{display:false} },
+        y:{ ticks:{font:{size:10}}, grid:{color:'#F0EFF5'} }
+      }
+    }
+  });
+}
+
+function bloc(res){
+  const wrap = document.createElement('div');
+  const table = res.table;
+  let html = `<div class="bulle">${esc(res.texte).replace(/\n/g,'<br>')}`;
+
+  if(table && table.lignes && table.lignes.length){
+    const d = preparer(table);
+    html += '<table class="res">';
+    d.labels.forEach((lab,i)=>{ html += `<tr><td class="l">${esc(lab)}</td><td class="v">${esc(formatValeur(d.valeurs[i], d.unite))}</td></tr>`; });
+    html += '</table>';
+  }
+  if(res.outil){
+    html += `<div><span class="tool">🔧 ${esc(res.outil)}</span>`;
+    if(res.duree) html += `<span class="meta">${res.duree.toFixed(1)} s</span>`;
+    html += '</div>';
+  }
+  if(res.outil || res.parametres){
+    html += `<details class="tech"><summary>Détail technique</summary><pre>outil : ${esc(res.outil||'—')}\nparamètres : ${esc(JSON.stringify(res.parametres||{}, null, 2))}</pre></details>`;
+  }
+  html += '</div>';
+  wrap.innerHTML = html;
+
+  // Graphique interactif si tableau présent
+  if(table && table.lignes && table.lignes.length){
+    const cid = 'ch_' + Math.random().toString(36).slice(2);
+    const gc = document.createElement('div');
+    gc.className = 'gc';
+    const defaut = table.est_temporel ? 'line' : 'bar';
+    gc.innerHTML =
+      `<div class="seg" role="group">
+         <button data-t="bar">Barres</button>
+         <button data-t="line">Courbe</button>
+         <button data-t="pie">Camembert</button>
+       </div>
+       <div class="chart-wrap"><canvas id="${cid}"></canvas></div>
+       <div class="dl">
+         <a href="#" data-csv>⬇️ CSV</a>
+         <a href="#" data-png>🖼️ PNG</a>
+       </div>`;
+    wrap.querySelector('.bulle').appendChild(gc);
+
+    const boutons = gc.querySelectorAll('.seg button');
+    function setType(t){
+      boutons.forEach(b=>b.classList.toggle('on', b.dataset.t===t));
+      dessiner(cid, table, t);
+    }
+    boutons.forEach(b=> b.addEventListener('click', ()=> setType(b.dataset.t)));
+
+    gc.querySelector('[data-csv]').addEventListener('click', e=>{
+      e.preventDefault();
+      const cols = table.colonnes || ['Libellé','Valeur'];
+      let csv = cols.join(';') + '\n' +
+        (table.lignes||[]).map(r=> r[0] + ';' + String(r[1]).replace('.',',')).join('\n');
+      const blob = new Blob(['\ufeff'+csv], {type:'text/csv'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'damia.csv'; a.click();
+    });
+    gc.querySelector('[data-png]').addEventListener('click', e=>{
+      e.preventDefault();
+      if(charts[cid]){ const a=document.createElement('a');
+        a.href = charts[cid].toBase64Image(); a.download = 'damia.png'; a.click(); }
+    });
+
+    setTimeout(()=> setType(defaut), 0);
+  }
+  return wrap;
+}
+
+function ligne(role, contenu){
+  const r = document.createElement('div');
+  r.className = 'row ' + (role==='user' ? 'user' : 'ai');
+  const av = document.createElement('div');
+  av.className = 'av ' + (role==='user' ? 'me' : 'ai');
+  av.textContent = role==='user' ? '🧑' : '⚕️';
+  r.appendChild(av);
+  if(role==='user'){
+    const b = document.createElement('div'); b.className='bulle'; b.textContent = contenu;
+    r.appendChild(b);
+  } else {
+    r.appendChild(contenu);
+  }
+  return r;
+}
+
+function accueil(){
+  const h = document.createElement('div');
+  h.innerHTML =
+    `<div class="hero"><h1>Interrogez les dépenses de l’Assurance Maladie</h1>
+     <p>Posez votre question en langage naturel — DAMIA interroge Open DAMIR (2022-2025).</p></div>
+     <div class="cards">${CAPACITES.map(c=>`<div class="ccard"><b>${c[0]}</b><span>${c[1]}</span></div>`).join('')}</div>
+     <div class="chips">${SUGGESTIONS.map(q=>`<div class="chip">${esc(q)}</div>`).join('')}</div>`;
+  h.querySelectorAll('.chip').forEach((el,i)=> el.addEventListener('click', ()=> envoyer(SUGGESTIONS[i])));
+  col.appendChild(h);
+}
+
+async function envoyer(q){
+  q = (q || input.value).trim();
+  if(!q) return;
+  if(col.querySelector('.hero')) col.innerHTML = '';
+  input.value = '';
+  col.appendChild(ligne('user', q));
+
+  const attente = document.createElement('div');
+  attente.className='row ai';
+  attente.innerHTML = `<div class="av ai">⚕️</div><div class="bulle" style="color:#9a9aa5">DAMIA réfléchit…</div>`;
+  col.appendChild(attente);
+  document.querySelector('main').scrollTop = 1e9;
+
+  try{
+    const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q})});
+    const res = await r.json();
+    attente.remove();
+    col.appendChild(ligne('assistant', bloc(res)));
+  }catch(err){
+    attente.remove();
+    const b=document.createElement('div'); b.className='bulle'; b.textContent='Erreur réseau : '+err;
+    col.appendChild(ligne('assistant', b));
+  }
+  document.querySelector('main').scrollTop = 1e9;
+}
+
+async function chargerModeles(){
+  try{
+    const r = await fetch('/api/models'); const d = await r.json();
+    sel.innerHTML = d.models.map(m=>`<option value="${m.key}">${m.label}</option>`).join('');
+    sel.value = d.actif;
+  }catch(e){ sel.innerHTML = '<option>Modèle indisponible</option>'; }
+}
+sel.addEventListener('change', async ()=>{
+  const r = await fetch('/api/model', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({key: sel.value})});
+  const d = await r.json();
+  toast(d.ok ? ('Modèle : '+d.label) : ('Bascule impossible : '+(d.error||'')));
+});
+
+sendBtn.addEventListener('click', ()=> envoyer());
+input.addEventListener('keydown', e=>{ if(e.key==='Enter') envoyer(); });
+
+chargerModeles();
+accueil();
+</script>
+</body>
+</html>
