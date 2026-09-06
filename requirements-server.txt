@@ -1,0 +1,11 @@
+# Dependances du SEUL serveur MCP (src/mcp_server.py) — utilise par le Dockerfile
+# et la Space Hugging Face.
+#
+# Le conteneur n'execute ni Streamlit, ni FastAPI, ni aucun backend de modele :
+# le serveur est model-agnostic, c'est le CLIENT qui apporte son IA. L'installer
+# avec le requirements.txt complet ne ferait qu'alourdir l'image et multiplier
+# les causes d'echec de build.
+#
+# Pour developper en local (interfaces + backends) : pip install -r requirements.txt
+mcp==1.28.0
+duckdb==1.5.0

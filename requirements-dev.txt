@@ -1,0 +1,7 @@
+# Outils de developpement, en plus de requirements.txt.
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# pytest fait tourner la suite automatique (tests/test_tools.py et
+# tests/test_registre.py) : ni LLM, ni serveur MCP, environ 3 secondes.
+#     python -m pytest
+pytest==9.1.1

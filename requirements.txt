@@ -1,19 +1,34 @@
-# === Démo (Ollama local) — indispensable ===
+# Versions figees sur l'environnement de developpement valide (pip list).
+# =============================================================================
+#  Serveur MCP (src/mcp_server.py) — le minimum pour le conteneur Docker / HF
+# =============================================================================
+mcp==1.28.0
 duckdb==1.5.0
-ollama==0.6.2
+
+# =============================================================================
+#  Interfaces
+# =============================================================================
+# Streamlit (app.py)
 streamlit==1.58.0
+pandas==3.0.1
+matplotlib==3.10.8
 
-# === Serveur MCP (src/mcp_server.py) ===
-mcp
+# FastAPI (api.py + static/index.html)
+fastapi==0.141.1
+uvicorn[standard]==0.49.0
 
-# === Optionnel — backend API distante (backends.py -> APIBackend) ===
-# anthropic
+# =============================================================================
+#  Backends de modele (src/backends.py) — un seul est necessaire a la fois
+# =============================================================================
+ollama==0.6.2                 # DAMIA_BACKEND=ollama   (defaut, local)
+openai==2.29.0                # DAMIA_BACKEND=openai   (Groq, Mistral, OpenRouter...)
+httpx==0.28.1                 # transport HTTP partage (client MCP + backends)
 
-# === Optionnel — backend Transformers local / GPU (backends.py -> TransformersBackend) ===
-# torch
+# Optionnels : decommenter selon le backend utilise
+# anthropic==0.112.0          # DAMIA_BACKEND=api
+# google-generativeai==0.8.6  # DAMIA_BACKEND=gemini
+# torch                       # DAMIA_BACKEND=transformers (GPU recommande)
 # transformers
 # bitsandbytes
 
-# NB : pandas retiré (jamais importé). 'requests' n'est plus nécessaire
-#      (OllamaBackend utilise désormais la librairie `ollama`).
-# Pour figer mcp/anthropic à une version : pip freeze | findstr /I "mcp anthropic"
+# NB : pour refiger apres une mise a jour -> pip freeze | findstr /I "mcp openai duckdb"
