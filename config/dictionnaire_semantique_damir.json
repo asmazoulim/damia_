@@ -1094,7 +1094,8 @@
     "scanner",
     "irm",
     "radio",
-    "échographie"
+    "échographie",
+    "radiographie"
    ],
    "filtre": {
     "colonne": "macro_categorie",
