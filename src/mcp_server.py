@@ -1,35 +1,58 @@
 """
-Serveur MCP DAMIA — version DÉPLOYABLE (transport HTTP, model-agnostic).
+Serveur MCP DAMIA — version DÉPLOYABLE (streamable-http, model-agnostic).
 
-Différence avec la version locale (stdio) : ce serveur écoute en HTTP, donc
-N'IMPORTE QUEL client MCP compatible peut s'y connecter à distance, avec SON
-PROPRE modèle. Le serveur n'embarque aucun LLM : il n'expose que des outils.
+- Transport par défaut : streamable-http (route **/mcp**), compatible proxy d'entreprise.
+- stateless_http=True + json_response=True : robuste derrière le routage HF
+  (chaque requête est autonome, pas de session en mémoire à retrouver).
+- Route GET / : répond 200 pour satisfaire le health check de Hugging Face.
+  Un serveur MCP n'a pas de page d'accueil ; sans cette route, / renvoie 404
+  et HF peut couper le container.
 
-Les docstrings des outils ci-dessous sont LUES par le client/modèle pour décider
-quel outil appeler : elles doivent rester claires et précises.
+Ce module ne contient AUCUNE logique métier : il se contente de déclarer la
+signature et la description de chaque outil (ce que le modèle lit pour choisir),
+et délègue à src/tools.py. Les descriptions sont donc du prompt : les modifier
+change le routage du modèle.
 
 Lancement :
-    python src/mcp_server.py
-Variables d'environnement :
-    MCP_HOST (défaut 0.0.0.0), MCP_PORT (défaut 7860)
-Endpoint exposé : http://<hote>:<port>/mcp   (transport streamable-http)
+    python src/mcp_server.py                       # HTTP streamable-http (/mcp)
+    MCP_TRANSPORT=stdio python src/mcp_server.py   # stdio (Claude Desktop)
+Variables : MCP_HOST (0.0.0.0), MCP_PORT (7860), MCP_TRANSPORT (streamable-http)
 """
+import logging
 import os
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mcp.server.fastmcp import FastMCP
+from starlette.responses import PlainTextResponse
+
 from src import tools
+
+logging.basicConfig(level=os.environ.get("DAMIA_LOG_LEVEL", "INFO"),
+                    format="%(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("damia.mcp")
 
 HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_PORT", "7860"))
 
-mcp = FastMCP("DAMIA", host=HOST, port=PORT)
+mcp = FastMCP("DAMIA", host=HOST, port=PORT,
+              stateless_http=True,   # robuste derriere le routage HF (pas de session a retrouver)
+              json_response=True)    # reponses JSON simples (pas de flux SSE a maintenir)
+
+
+@mcp.custom_route("/", methods=["GET"])
+async def racine(request):
+    """Health check Hugging Face — le serveur MCP n'a pas de page d'accueil."""
+    return PlainTextResponse(
+        "DAMIA — serveur MCP Open DAMIR. Endpoint MCP : /mcp (streamable-http). "
+        "Ce serveur se consomme via un client MCP, pas dans un navigateur."
+    )
 
 
 # --------------------------------------------------------------------------
-# Outils existants
+# Outils exposés
 # --------------------------------------------------------------------------
 @mcp.tool()
 def query_depenses(mesure: str = "montant_rembourse", poste: str | None = None,
@@ -42,13 +65,11 @@ def query_depenses(mesure: str = "montant_rembourse", poste: str | None = None,
     - poste : grand poste de soin (optique, dentaire, pharmacie...).
     - sous_categorie : sous-catégorie précise (ex. 'Prothèse RAC 0', 'Soins Conservateurs').
     - decoupage : distinction fine au niveau prestation, pour les VERRES, MONTURES
-      ou LENTILLES en optique (ex. decoupage='verres'). Utiliser ce paramètre
-      pour toute question distinguant verres et montures."""
+      ou LENTILLES en optique (ex. decoupage='verres')."""
     return tools.query_depenses(mesure, poste, annee, region, age, sexe,
                                 sous_categorie, decoupage)
 
 
-@mcp.tool()
 @mcp.tool()
 def compare_periods(annee1: int | None = None, annee2: int | None = None,
                     poste: str | None = None,
@@ -70,13 +91,12 @@ def list_valeurs(dimension: str) -> str:
     """Liste les valeurs possibles d'une dimension : poste, region, age, sexe ou annee."""
     return tools.list_valeurs(dimension)
 
+
 @mcp.tool()
 def top_postes(mesure: str = "montant_rembourse", annee: int | None = None, n: int = 5) -> str:
     """Classement des postes de soin par mesure (top N).
-    Pour les questions du type 'quels sont les postes qui coûtent le plus', 'top 5 postes'.
-    Pour les questions du type 'quels sont les postes qui coûtent le plus en 2023', préciser l'année.
-    Pour les questions du type 'quel poste est le plus remboursé en 2023', 
-    répondre Le poste X est le plus remboursé en 2023 à hauteur de Y euros."""
+    Pour 'quels sont les postes qui coûtent le plus', 'top 5 postes'.
+    Préciser l'année pour 'top 5 postes en 2023'."""
     return tools.top_postes(mesure, annee, n)
 
 
@@ -94,9 +114,10 @@ def repartition(mesure: str = "montant_rembourse", dimension: str = "poste",
 def evolution_serie(mesure: str = "montant_rembourse", poste: str | None = None,
                     sous_categorie: str | None = None, decoupage: str | None = None) -> str:
     """Évolution d'une mesure sur TOUTES les années disponibles (2022-2025).
-    À utiliser pour « évolution de X », « tendance de X », « X au fil du temps »,
-    sans années précises. Peut cibler un poste, une sous_categorie ou un decoupage."""
+    À utiliser pour « évolution de X », « tendance de X », « X au fil du temps ».
+    Peut cibler un poste, une sous_categorie ou un decoupage."""
     return tools.evolution_serie(mesure, poste, sous_categorie, decoupage)
+
 
 @mcp.tool()
 def taux_couverture(poste: str | None = None, annee: int | None = None) -> str:
@@ -105,6 +126,32 @@ def taux_couverture(poste: str | None = None, annee: int | None = None) -> str:
     return tools.taux_couverture(poste, annee)
 
 
+@mcp.tool()
+def decrire_variable(nom: str) -> str:
+    """Décrit une variable du référentiel Open DAMIR (schéma, pas données) :
+    libellé, catégorie, description, modalités possibles et statut d'exploitation.
+    Ex. decrire_variable('PRS_REM_TYP'), decrire_variable('EXO_MTF').
+    Répond aux questions « que contient la variable X », « quelles modalités pour X »."""
+    return tools.decrire_variable(nom)
+
+
+@mcp.tool()
+def lister_variables(categorie: str | None = None) -> str:
+    """Liste les variables du référentiel Open DAMIR, éventuellement filtrées par
+    catégorie (periode, beneficiaire, prestation, executant, prescripteur...).
+    Sans argument : liste les catégories. Répond à « quelles variables existent »."""
+    return tools.lister_variables(categorie)
+
+
 if __name__ == "__main__":
-    # transport HTTP (streamable-http) -> accessible par tout client MCP distant
-    mcp.run(transport="sse")
+    import asyncio
+
+    try:
+        outils = asyncio.run(mcp.list_tools())
+        log.info("%d outils enregistres : %s", len(outils), [t.name for t in outils])
+    except Exception:
+        log.exception("Impossible de lister les outils au demarrage")
+
+    transport = os.environ.get("MCP_TRANSPORT", "streamable-http")
+    log.info("Demarrage transport=%s host=%s port=%s", transport, HOST, PORT)
+    mcp.run(transport=transport)
