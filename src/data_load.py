@@ -1,50 +1,51 @@
 """
 data_load.py — (Re)construit la base DuckDB du POC depuis les CSV sources.
 
-Crée deux tables :
-  - faits        <- fact_damir_2022_2025.csv  (séparateur ',')
-  - prestations  <- dim_prestations.csv        (séparateur ';')
+Cree deux tables :
+  - faits        <- fact_damir_2022_2025.csv  (separateur ',')
+  - prestations  <- dim_prestations.csv       (separateur ';')
 
-Ces noms de tables sont ceux attendus par tools.py (FROM faits f JOIN prestations p).
-Idempotent : on remplace les tables si elles existent déjà.
+Ces noms sont ceux attendus par tools.py (FROM faits f JOIN prestations p).
+Idempotent : les tables sont remplacees si elles existent deja.
 
 USAGE :
     python src/data_load.py
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import duckdb
+
 from config.config import CHEMIN_DB, CSV_FAITS, CSV_PRESTATIONS
 
 
 def construire():
-    for chemin in (CSV_FAITS, CSV_PRESTATIONS):
-        if not Path(chemin).exists():
-            print(f"ERREUR : CSV introuvable -> {chemin}")
-            return
+    manquants = [c for c in (CSV_FAITS, CSV_PRESTATIONS) if not Path(c).exists()]
+    if manquants:
+        raise SystemExit("CSV introuvable(s) :\n  "
+                         + "\n  ".join(str(c) for c in manquants))
 
-    con = duckdb.connect(str(CHEMIN_DB))  # lecture-écriture
+    CHEMIN_DB.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(CHEMIN_DB))     # lecture-ecriture
     try:
-        # Table de faits (CSV séparé par des virgules, en-tête entre guillemets)
+        # Les chemins sont passes en PARAMETRE, pas interpoles dans le SQL.
         con.execute("DROP TABLE IF EXISTS faits")
-        con.execute(f"""
-            CREATE TABLE faits AS
-            SELECT * FROM read_csv_auto('{CSV_FAITS}', header=true, delim=',')
-        """)
+        con.execute("CREATE TABLE faits AS "
+                    "SELECT * FROM read_csv_auto(?, header=true, delim=',')",
+                    [str(CSV_FAITS)])
 
-        # Table de dimension (CSV séparé par des points-virgules, BOM possible)
         con.execute("DROP TABLE IF EXISTS prestations")
-        con.execute(f"""
-            CREATE TABLE prestations AS
-            SELECT * FROM read_csv_auto('{CSV_PRESTATIONS}', header=true, delim=';')
-        """)
+        con.execute("CREATE TABLE prestations AS "
+                    "SELECT * FROM read_csv_auto(?, header=true, delim=';')",
+                    [str(CSV_PRESTATIONS)])
 
-        nb_f = con.execute("SELECT COUNT(*) FROM faits").fetchone()[0]
-        nb_p = con.execute("SELECT COUNT(*) FROM prestations").fetchone()[0]
+        nb_faits = con.execute("SELECT COUNT(*) FROM faits").fetchone()[0]
+        nb_prestations = con.execute("SELECT COUNT(*) FROM prestations").fetchone()[0]
 
-        # Contrôle de cohérence de la jointure (anti-mauvaise surprise)
+        # Controle de coherence de la jointure : une prs_nat absente de la
+        # dimension ferait disparaitre des faits de TOUS les resultats en silence.
         orphelins = con.execute("""
             SELECT COUNT(*) FROM faits f
             LEFT JOIN prestations p
@@ -52,7 +53,8 @@ def construire():
             WHERE p.prs_nat IS NULL
         """).fetchone()[0]
 
-        print(f"OK  faits = {nb_f:,} lignes  |  prestations = {nb_p:,} lignes".replace(",", " "))
+        print(f"OK  faits = {nb_faits:,} lignes  |  "
+              f"prestations = {nb_prestations:,} lignes".replace(",", " "))
         if orphelins:
             print(f"  ⚠ {orphelins:,} lignes de faits sans prestation correspondante "
                   f"(prs_nat absent de la dimension).".replace(",", " "))
