@@ -4,8 +4,8 @@ Objectif : verifier (1) la vitesse sur reponse COURTE, (2) le tool-calling.
 """
 import sys
 import time
-import json
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import ollama

@@ -9,26 +9,44 @@ reponses du glossaire, dont le routage seul ne garantit pas la justesse.
 Produit un rapport HTML exportable + un CSV.
 
 Lancement (depuis la racine) :
-    python tests/banc_test.py
+    python tests/banc_test.py              # menu interactif : choix du moteur
+    python tests/banc_test.py groq-20b     # preset impose (voir src/modeles.py)
+    python tests/banc_test.py --env        # garde la configuration du .env
+
+Le menu ne s'affiche que sur un terminal interactif : lance depuis un script ou
+une CI, le banc prend la configuration du .env sans se bloquer sur une saisie.
+
+Les rapports sont ecrits dans rapports/ (dossier ignore par git : ils sont
+regenerables, et leur accumulation a la racine polluait le depot). Leur nom
+porte le modele teste, pour comparer deux moteurs d'un coup d'oeil.
 """
-import sys, os, json, re, csv, datetime, time, unicodedata
+import csv
+import datetime
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
 
 # Racine du projet = dossier parent de tests/
-RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, RACINE)
-sys.path.insert(0, os.path.join(RACINE, "src"))
+RACINE = Path(__file__).parent.parent
+sys.path.insert(0, str(RACINE))
 
 from src.assistant import poser_question
 from src.backends import get_backend
+from src.formatage import extraire_table
+from src.mcp_client import SEPARATEUR as SEPARATEUR_SOURCE
+from src.normalisation import sans_accent
+from src import modeles
 
-CHEMIN_CAS = os.path.join(RACINE, "config", "cas_tests.json")
+CHEMIN_CAS = RACINE / "config" / "cas_tests.json"
+DOSSIER_RAPPORTS = RACINE / "rapports"
 
 
 def _norm_txt(s):
     """Minuscule, sans accents : rend la comparaison de contenu robuste aux accents."""
-    s = unicodedata.normalize("NFKD", str(s or ""))
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return s.lower()
+    return sans_accent(s or "")
 
 
 def _nombre_depuis_texte(texte):
@@ -53,18 +71,13 @@ def _nombre_depuis_texte(texte):
 
 
 def _valeur_reponse(res):
-    """Recupere la valeur calculee : d'abord le bloc table structure, sinon la phrase."""
+    """Recupere la valeur calculee : d'abord le bloc table structure (exact),
+    sinon la phrase (re-parse du montant formate, moins precis)."""
     rep = res.get("reponse", "") or ""
-    if "<!--DAMIA_TABLE:" in rep:
-        try:
-            deb = rep.index("<!--DAMIA_TABLE:") + len("<!--DAMIA_TABLE:")
-            fin = rep.index("-->", deb)
-            table = json.loads(rep[deb:fin])
-            lignes = table.get("lignes") or []
-            if lignes:
-                return sum(float(l[1] or 0) for l in lignes)
-        except (ValueError, json.JSONDecodeError):
-            pass
+    _, table = extraire_table(rep)
+    lignes = (table or {}).get("lignes") or []
+    if lignes:
+        return sum(float(l[1] or 0) for l in lignes)
     return _nombre_depuis_texte(rep)
 
 
@@ -92,32 +105,63 @@ def _contenu_ok(attendus_txt, reponse):
     return (not manquants), manquants
 
 
-def executer():
-    data = json.load(open(CHEMIN_CAS, encoding="utf-8"))
+# Les outils informatifs (definition, meta) renvoient un texte legitime qui peut
+# contenir « hors perimetre » (ex. la definition de l'AMC) : on ne les scanne PAS
+# comme des refus. Le scan textuel ne vise que les refus implicites des outils de
+# donnees (ex. query_depenses qui ne trouve rien).
+OUTILS_INFORMATIFS = {"get_dictionnaire", "reponse_meta"}
+PHRASES_REFUS = ["ne reconnais pas", "je préfère ne pas",
+                 "ne fait pas partie du périmètre", "hors du périmètre",
+                 "hors périmètre", "aucune donnée disponible"]
+
+
+def _nom_court(outil):
+    """Retire le prefixe de source d'un nom d'outil qualifie.
+
+    Les outils sont exposes en « source.outil » (voir src/mcp_client.py) alors
+    que cas_tests.json liste des noms courts. Comparer sans deprefixer ferait
+    echouer 100 % des cas de routage."""
+    return outil.rsplit(SEPARATEUR_SOURCE, 1)[-1] if outil else outil
+
+
+def _routage_attendu(cas, outil):
+    """Vrai si l'outil obtenu figure parmi ceux acceptes par le cas.
+    Tolere les deux ecritures, qualifiee ou courte, des deux cotes."""
+    acceptes = cas.get("outils_acceptes")
+    if not acceptes:
+        return True
+    return _nom_court(outil) in {_nom_court(a) for a in acceptes}
+
+
+def executer(verbeux=True):
+    """Execute tous les cas. verbeux=True affiche chaque verdict AU FIL DE L'EAU :
+    65 questions prennent plus d'une minute, et un terminal muet pendant ce
+    temps-la ne se distingue pas d'un blocage."""
+    data = json.loads(CHEMIN_CAS.read_text(encoding="utf-8"))
     meta = data.get("_meta", {})
     tol_defaut = meta.get("tolerance_pct_defaut", 1.0)
     resultats = []
+    cas_total = len(data["cas"])
 
-    for cas in data["cas"]:
+    for numero, cas in enumerate(data["cas"], 1):
         q = cas["question"]
+        if verbeux:
+            print(f"  [{numero:2d}/{cas_total}] {q[:56]:<56}", end="", flush=True)
         t0 = time.perf_counter()
-        res = poser_question(q)
+        try:
+            res = poser_question(q)
+        except Exception as e:
+            # Une panne isolee (LLM indisponible, timeout) ne doit pas perdre les
+            # resultats deja obtenus : on marque le cas et on poursuit.
+            res = {"reponse": f"ERREUR : {e}", "outil": None, "parametres": None}
         duree = time.perf_counter() - t0
 
         outil = res.get("outil")
         params = res.get("parametres") or {}
         rep = res.get("reponse", "") or ""
         rep_bas = rep.lower()
-        # Les outils informatifs (definition, meta) renvoient un texte legitime qui
-        # peut contenir « hors perimetre » (ex. la definition de l'AMC) : on ne les
-        # scanne PAS comme des refus. Le scan textuel ne vise que les refus implicites
-        # des outils de donnees (ex. query_depenses qui ne trouve rien).
-        OUTILS_INFORMATIFS = {"get_dictionnaire", "reponse_meta"}
-        phrases_refus = ["ne reconnais pas", "je préfère ne pas",
-                         "ne fait pas partie du périmètre", "hors du périmètre",
-                         "hors périmètre", "aucune donnée disponible"]
         texte_refus = (outil not in OUTILS_INFORMATIFS
-                       and any(p in rep_bas for p in phrases_refus))
+                       and any(p in rep_bas for p in PHRASES_REFUS))
         est_refus = bool(res.get("hors_perimetre")) or (outil is None) or texte_refus
 
         r = {"question": q, "categorie": cas.get("categorie", ""),
@@ -133,8 +177,8 @@ def executer():
             r["verdict"] = "OK" if est_refus else "ÉCHEC"
         else:
             r["type"] = "Calcul"
-            outils_ok = outil in cas.get("outils_acceptes", []) if cas.get("outils_acceptes") else True
-            r["routage_ok"] = bool(outils_ok and _params_ok(cas.get("params_attendus"), params)
+            r["routage_ok"] = bool(_routage_attendu(cas, outil)
+                                   and _params_ok(cas.get("params_attendus"), params)
                                    and not est_refus)
             if cas.get("valeur_attendue") is not None:
                 val = _valeur_reponse(res)
@@ -158,6 +202,8 @@ def executer():
                                     and (r["contenu_ok"] is not False)) else "ÉCHEC"
 
         resultats.append(r)
+        if verbeux:
+            print(f" {r['verdict']:<6} {duree:5.2f}s  {r['outil_obtenu']}", flush=True)
 
     return meta, resultats
 
@@ -239,28 +285,69 @@ def rapport_html(meta, resultats, modele):
 </body></html>"""
 
 
+def _selectionner_moteur():
+    """Choisit le moteur avant le premier appel au modèle.
+
+    - `python tests/banc_test.py groq-20b` : preset impose (scripts, CI)
+    - `python tests/banc_test.py --env`    : garde le .env, sans rien demander
+    - sans argument, sur un terminal       : menu interactif
+    - sans argument, hors terminal         : garde le .env (pas de blocage)
+    """
+    argument = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
+    if "--env" in sys.argv:
+        pass                      # on ne touche a rien : le .env fait foi
+    elif argument:
+        try:
+            modeles.appliquer(argument)
+        except KeyError as e:
+            raise SystemExit(str(e))
+    else:
+        modeles.choisir_interactivement()
+
+    # force_reload : le backend a pu etre construit et mis en cache lors d'un
+    # import precedent, avec l'ancienne configuration.
+    backend = get_backend(force_reload=True)
+    modele_nom = (getattr(backend, "modele", None)
+                  or getattr(backend, "model_id", None) or "?")
+    return backend, f"{os.environ.get('DAMIA_BACKEND', 'ollama')} / {modele_nom}"
+
+
 if __name__ == "__main__":
-    backend = get_backend()
-    backend_type = os.environ.get("DAMIA_BACKEND", "ollama")
-    modele_nom = getattr(backend, "modele", None) or getattr(backend, "model_id", None) or "?"
-    modele = f"{backend_type} / {modele_nom}"
-    print(f"Lancement du banc de test (modèle : {modele})...\n")
-    meta, resultats = executer()
+    backend, modele = _selectionner_moteur()
+    print(f"\nLancement du banc de test (modèle : {modele})...\n")
+    meta, resultats = executer(verbeux=True)
 
     total = len(resultats)
     ok = sum(1 for r in resultats if r["verdict"] == "OK")
     t = _stats_temps(resultats)
-    for r in resultats:
-        print(f"  [{r['verdict']:6s}] {r['duree']:5.2f}s  {r['question'][:50]}")
-    print(f"\n=> {ok}/{total} réussis ({100*ok//total}%) | "
+
+    echecs = [r for r in resultats if r["verdict"] != "OK"]
+    if echecs:
+        print(f"\n--- {len(echecs)} échec(s) ---")
+        for r in echecs:
+            motif = []
+            if r["routage_ok"] is False:
+                motif.append(f"routage (outil={r['outil_obtenu']})")
+            if r["calcul_ok"] is False:
+                motif.append("calcul")
+            if r.get("contenu_manquant"):
+                motif.append("manque : " + ", ".join(r["contenu_manquant"]))
+            print(f"  [{r['categorie']}] {r['question'][:60]}")
+            print(f"      {' | '.join(motif) or 'motif indetermine'}")
+
+    print(f"\n=> {ok}/{total} réussis ({_pct(ok, total)}) | "
           f"temps moyen {t['moyen']:.2f}s, total {t['total']:.1f}s")
 
-    html = rapport_html(meta, resultats, modele)
+    # Le nom du fichier porte le modele : c'est ce qui rend deux rapports
+    # comparables d'un coup d'oeil quand on evalue plusieurs moteurs.
+    DOSSIER_RAPPORTS.mkdir(exist_ok=True)
     horo = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    f_html = f"rapport_test_{horo}.html"
-    open(f_html, "w", encoding="utf-8").write(html)
+    base = f"rapport_test_{horo}_{modeles.slug(modele)}"
 
-    f_csv = f"rapport_test_{horo}.csv"
+    f_html = DOSSIER_RAPPORTS / f"{base}.html"
+    f_html.write_text(rapport_html(meta, resultats, modele), encoding="utf-8")
+
+    f_csv = DOSSIER_RAPPORTS / f"{base}.csv"
     with open(f_csv, "w", newline="", encoding="utf-8-sig") as fp:
         w = csv.writer(fp, delimiter=";")
         w.writerow(["Categorie", "Question", "Outil obtenu", "Routage OK",
