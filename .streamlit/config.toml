@@ -1,4 +1,4 @@
-# À placer dans  .streamlit/config.toml  à la racine du projet
+
 [theme]
 primaryColor = "#534AB7"
 backgroundColor = "#FFFFFF"
